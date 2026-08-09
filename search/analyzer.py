@@ -1,104 +1,73 @@
-from PySide6.QtCore import QThread, Signal
+﻿from pathlib import Path
 
 from database.db import get_connection
 from readers.document_reader import read_document
+from indexer.single_file import load_and_index_file
 
 
-class DocumentAnalyzer(QThread):
+class DocumentAnalyzer:
 
-    progress = Signal(
-        int,
-        int,
-        str
-    )
+    def __init__(self):
+        pass
 
-    finished = Signal(
-        int,
-        int
-    )
+    def analyze_file(self, file_id, filepath, is_cloud=False):
 
-    error = Signal(str)
+        filepath = Path(filepath)
 
-    def __init__(
-        self,
-        files
-    ):
-        super().__init__()
+        if not filepath.exists():
+            return ""
 
-        self.files = files
-
-    def run(self):
-
-        conn = None
-
-        try:
+        # Для cloud-файла используем единый механизм:
+        # hydrate -> прочитать -> сохранить в БД.
+        if is_cloud:
+            if not load_and_index_file(
+                file_id,
+                filepath,
+                is_cloud=True
+            ):
+                return ""
 
             conn = get_connection()
 
-            cursor = conn.cursor()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT content
+                    FROM files
+                    WHERE id = ?
+                    """,
+                    (file_id,)
+                ).fetchone()
 
-            total = len(
-                self.files
-            )
-
-            analyzed = 0
-
-            for number, file in enumerate(
-                self.files,
-                start=1
-            ):
-
-                filepath = file["filepath"]
-                file_id = file["id"]
-                filename = file["filename"]
-
-                self.progress.emit(
-                    number,
-                    total,
-                    filename
-                )
-
-                try:
-
-                    content = read_document(
-                        filepath
-                    )
-
-                    if content:
-
-                        cursor.execute("""
-                            UPDATE files
-                            SET content = ?
-                            WHERE id = ?
-                        """, (
-                            content,
-                            file_id
-                        ))
-
-                        analyzed += 1
-
-                except Exception as error:
-
-                    print(
-                        f"Ошибка анализа "
-                        f"{filepath}: {error}"
-                    )
-
-            conn.commit()
-
-            self.finished.emit(
-                analyzed,
-                total
-            )
-
-        except Exception as error:
-
-            self.error.emit(
-                str(error)
-            )
-
-        finally:
-
-            if conn:
-
+            finally:
                 conn.close()
+
+            return row[0] if row and row[0] else ""
+
+        # Локальный файл можно читать непосредственно.
+        return read_document(filepath)
+
+    def analyze_files(self, files):
+
+        results = []
+
+        for file in files:
+
+            file_id = file.get("id")
+            filepath = file.get("filepath")
+            is_cloud = bool(file.get("is_cloud", False))
+
+            content = self.analyze_file(
+                file_id,
+                filepath,
+                is_cloud
+            )
+
+            if content:
+                results.append({
+                    "id": file_id,
+                    "filepath": filepath,
+                    "content": content
+                })
+
+        return results

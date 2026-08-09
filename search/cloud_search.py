@@ -1,41 +1,49 @@
-﻿from pathlib import Path
-
-from database.db import get_connection
-from onedrive.hydrate import hydrate_file
-from readers.document_reader import read_document
+﻿from database.db import get_connection
+from indexer.single_file import load_and_index_file
 
 
-def hydrate_and_read(file_id, filepath):
-    path = Path(filepath)
+def hydrate_and_index(file_id, filepath):
+    """
+    Принудительно загружает cloud-файл,
+    читает его и сохраняет текст в БД.
+    """
 
-    if not path.exists():
-        return False
+    return load_and_index_file(
+        file_id,
+        filepath,
+        is_cloud=True
+    )
+
+
+def hydrate_file_by_id(file_id):
+    """
+    Загружает cloud-файл по ID из базы.
+    """
+
+    conn = get_connection()
 
     try:
-        hydrate_file(path)
-
-        content = read_document(path)
-
-        if not content:
-            return False
-
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
+        row = conn.execute(
             """
-            UPDATE files
-            SET content = ?, is_cloud = 0
+            SELECT filepath, is_cloud
+            FROM files
             WHERE id = ?
             """,
-            (content, file_id),
-        )
+            (file_id,)
+        ).fetchone()
 
-        conn.commit()
+    finally:
         conn.close()
 
+    if not row:
+        return False
+
+    filepath, is_cloud = row
+
+    if not is_cloud:
         return True
 
-    except Exception as e:
-        print("Ошибка загрузки документа:", e)
-        return False
+    return hydrate_and_index(
+        file_id,
+        filepath
+    )
