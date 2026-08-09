@@ -150,18 +150,64 @@ def convert_with_libreoffice(filepath):
 
 
 def read_doc(filepath):
-    converted = convert_with_libreoffice(filepath)
+    source = Path(filepath)
 
-    if not converted:
+    soffice = shutil.which("soffice")
+
+    if not soffice:
+        candidates = [
+            Path(r"C:\Program Files\LibreOffice\program\soffice.exe"),
+            Path(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                soffice = str(candidate)
+                break
+
+    if not soffice:
         return ""
 
+    output_dir = Path(
+        tempfile.mkdtemp(prefix="zervdiag_doc_")
+    )
+
     try:
-        return read_docx(converted)
+        result = subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--convert-to",
+                "txt:Text",
+                "--outdir",
+                str(output_dir),
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            return ""
+
+        converted = output_dir / f"{source.stem}.txt"
+
+        if not converted.exists():
+            return ""
+
+        return converted.read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    except Exception:
+        return ""
 
     finally:
         shutil.rmtree(
-            converted.parent,
-            ignore_errors=True
+            output_dir,
+            ignore_errors=True,
         )
 
 
