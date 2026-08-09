@@ -1,3 +1,4 @@
+from pathlib import Path
 from database.db import get_connection
 from indexer.scanner import scan_folder
 from readers.document_reader import read_document
@@ -173,10 +174,13 @@ def index_folder(folder, progress_callback=None):
             )
 
     # -------------------------------------------------
-    # Ищем файлы, которые исчезли из папки
+    # -------------------------------------------------
+    # ???? ?????, ??????? ??????? ?????? ?? ??????? ?????
     # -------------------------------------------------
 
     try:
+
+        root_folder = Path(folder).resolve()
 
         cursor.execute(
             "SELECT filepath FROM files"
@@ -187,9 +191,20 @@ def index_folder(folder, progress_callback=None):
             for row in cursor.fetchall()
         }
 
-        missing_paths = (
-            database_paths - current_paths
-        )
+        missing_paths = set()
+
+        for db_path in database_paths:
+            try:
+                resolved = Path(db_path).resolve()
+
+                if (
+                    resolved.is_relative_to(root_folder)
+                    and db_path not in current_paths
+                ):
+                    missing_paths.add(db_path)
+
+            except (OSError, ValueError):
+                pass
 
         for filepath in missing_paths:
 
@@ -206,7 +221,7 @@ def index_folder(folder, progress_callback=None):
     except Exception as error:
 
         print(
-            f"Ошибка проверки удалённых файлов: "
+            f"?????? ???????? ????????? ??????: "
             f"{error}"
         )
 
