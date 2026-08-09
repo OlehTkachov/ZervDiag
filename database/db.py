@@ -9,32 +9,70 @@ DB_PATH = DATA_DIR / "zervdiag.db"
 
 def get_connection():
     DATA_DIR.mkdir(exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+
+    return sqlite3.connect(
+        DB_PATH
+    )
 
 
 def create_database():
+
     conn = get_connection()
+
     cursor = conn.cursor()
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS files (
+
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+
             filename TEXT NOT NULL,
+
             filepath TEXT NOT NULL UNIQUE,
+
             extension TEXT,
+
             size INTEGER,
+
             modified REAL,
-            content TEXT
+
+            content TEXT,
+
+            file_hash TEXT,
+
+            is_cloud INTEGER DEFAULT 0
+
         )
     """)
 
-    cursor.execute("PRAGMA table_info(files)")
-    columns = [row[1] for row in cursor.fetchall()]
+    # Совместимость со старой базой
+    cursor.execute(
+        "PRAGMA table_info(files)"
+    )
+
+    columns = {
+        row[1]
+        for row in cursor.fetchall()
+    }
 
     if "content" not in columns:
+
         cursor.execute(
             "ALTER TABLE files ADD COLUMN content TEXT"
         )
 
+    if "file_hash" not in columns:
+
+        cursor.execute(
+            "ALTER TABLE files ADD COLUMN file_hash TEXT"
+        )
+
+    if "is_cloud" not in columns:
+
+        cursor.execute(
+            "ALTER TABLE files ADD COLUMN is_cloud INTEGER DEFAULT 0"
+        )
+
     conn.commit()
+
     conn.close()
