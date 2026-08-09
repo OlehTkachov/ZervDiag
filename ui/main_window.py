@@ -682,6 +682,7 @@ class MainWindow(QMainWindow):
                 "id": result.file_id,
                 "filename": result.filename,
                 "filepath": result.filepath,
+		"is_cloud": result.is_cloud,
             })
 
         if not files:
