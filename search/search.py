@@ -1,44 +1,79 @@
+﻿import re
+
 from database.db import get_connection
 from search.search_result import SearchResult
+from indexer.single_file import index_single_file
 
 
-def make_snippet(text, query, radius=150):
-
+def normalize_text(text):
     if not text:
         return ""
 
-    text_lower = text.lower()
+    text = text.lower()
 
-    for word in query.lower().split():
+    # Убираем переносы строк внутри слов
+    text = re.sub(r"(?<=\w)-\s+", "", text)
 
-        position = text_lower.find(word)
+    # Склеиваем характерные разрывы OCR/PDF:
+    # "аккум ул я тор" -> "аккумулятор"
+    previous = None
 
-        if position != -1:
+    while previous != text:
+        previous = text
 
-            start = max(
-                0,
-                position - radius
-            )
+        text = re.sub(
+            r"(?<=\w)\s+(?=\w)",
+            " ",
+            text
+        )
 
-            end = min(
-                len(text),
-                position + len(word) + radius
-            )
+    # Дополнительно создаём вариант без пробелов
+    # для поиска слов, разбитых PDF-извлечением.
+    compact = re.sub(r"\s+", "", text)
 
-            result = text[start:end].replace(
-                "\n",
-                " "
-            )
+    return text + "\n" + compact
 
-            if start > 0:
-                result = "..." + result
 
-            if end < len(text):
-                result += "..."
+def make_snippet(text, query, radius=150):
+    if not text:
+        return ""
 
-            return result
+    normalized = normalize_text(text)
+    query = query.lower()
 
-    return ""
+    position = normalized.find(query)
+
+    if position == -1:
+        compact = re.sub(r"\s+", "", text.lower())
+        position = compact.find(re.sub(r"\s+", "", query))
+
+        if position == -1:
+            return ""
+
+        return "..." + text[:radius].replace("\n", " ") + "..."
+
+    start = max(0, position - radius)
+    end = min(len(normalized), position + len(query) + radius)
+
+    result = normalized[start:end].replace("\n", " ")
+
+    if start > 0:
+        result = "..." + result
+
+    if end < len(normalized):
+        result += "..."
+
+    return result
+
+
+def matches(text, words):
+    normalized = normalize_text(text)
+
+    for word in words:
+        if word not in normalized:
+            return False
+
+    return True
 
 
 def search_files(query):
@@ -51,9 +86,8 @@ def search_files(query):
     words = query.lower().split()
 
     conn = get_connection()
-    cursor = conn.cursor()
 
-    cursor.execute("""
+    rows = conn.execute("""
         SELECT
             id,
             filename,
@@ -63,49 +97,30 @@ def search_files(query):
             is_cloud
         FROM files
         ORDER BY filepath
-    """)
-
-    rows = cursor.fetchall()
+    """).fetchall()
 
     conn.close()
 
     results = []
-
-    # Пути уже показанных файлов
-    seen_paths = set()
+    candidates = []
 
     for row in rows:
 
-        file_id = row[0]
-        filename = row[1] or ""
-        extension = row[2] or ""
-        filepath = row[3] or ""
-        content = row[4] or ""
-        is_cloud = bool(row[5])
+        file_id, filename, extension, filepath, content, is_cloud = row
 
-        # Нормализуем путь
-        normalized_path = filepath.strip().lower()
+        filename = filename or ""
+        filepath = filepath or ""
+        content = content or ""
 
-        # Защита от дублей
-        if normalized_path in seen_paths:
-            continue
-
-        searchable_text = (
-            filename
-            + " "
-            + filepath
-            + " "
-            + content
+        name_path = (
+            filename + " " + filepath
         ).lower()
 
-        if all(
-            word in searchable_text
-            for word in words
+        # Обычный поиск
+        if matches(
+            name_path + " " + content,
+            words
         ):
-
-            seen_paths.add(
-                normalized_path
-            )
 
             snippet = make_snippet(
                 content,
@@ -113,11 +128,7 @@ def search_files(query):
             )
 
             if not snippet:
-
-                snippet = (
-                    "Найдено в имени "
-                    "или пути файла"
-                )
+                snippet = "Найдено в имени или пути файла"
 
             results.append(
                 SearchResult(
@@ -126,7 +137,82 @@ def search_files(query):
                     extension=extension,
                     filepath=filepath,
                     snippet=snippet,
-                    is_cloud=is_cloud
+                    is_cloud=bool(is_cloud)
+                )
+            )
+
+            continue
+
+        # Cloud PDF трогаем только если запрос
+        # найден в имени или пути.
+        if (
+            is_cloud
+            and extension.lower() == ".pdf"
+            and matches(name_path, words)
+        ):
+            candidates.append(row)
+
+    # Индексируем только кандидатов
+    for row in candidates:
+
+        file_id = row[0]
+        filename = row[1]
+        filepath = row[3]
+
+        print("Загрузка:", filename)
+
+        try:
+            if not index_single_file(
+                file_id,
+                filepath
+            ):
+                continue
+
+        except Exception as error:
+            print("Ошибка:", error)
+            continue
+
+        conn = get_connection()
+
+        fresh = conn.execute("""
+            SELECT
+                id,
+                filename,
+                extension,
+                filepath,
+                content,
+                is_cloud
+            FROM files
+            WHERE id = ?
+        """, (file_id,)).fetchone()
+
+        conn.close()
+
+        if not fresh:
+            continue
+
+        content = fresh[4] or ""
+
+        if matches(
+            (fresh[1] or "") + " " +
+            (fresh[3] or "") + " " +
+            content,
+            words
+        ):
+
+            snippet = make_snippet(
+                content,
+                query
+            )
+
+            results.append(
+                SearchResult(
+                    file_id=fresh[0],
+                    filename=fresh[1],
+                    extension=fresh[2],
+                    filepath=fresh[3],
+                    snippet=snippet,
+                    is_cloud=bool(fresh[5])
                 )
             )
 
