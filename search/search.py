@@ -1,4 +1,4 @@
-﻿import re
+import re
 
 from database.db import get_connection
 from search.search_result import SearchResult
@@ -143,15 +143,24 @@ def search_files(query):
 
             continue
 
-        # Cloud PDF трогаем только если запрос
-        # найден в имени или пути.
+        # Cloud-документы: загружаем подходящие файлы
+        # и затем проверяем их содержимое.
+        significant_words = [
+            word for word in words
+            if len(word) >= 4
+        ]
+
         if (
             is_cloud
-            and extension.lower() == ".pdf"
-            and matches(name_path, words)
+            and extension.lower() in {
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx"
+            }
+            and any(
+                word in name_path
+                for word in significant_words
+            )
         ):
             candidates.append(row)
-
     # Индексируем только кандидатов
     for row in candidates:
 

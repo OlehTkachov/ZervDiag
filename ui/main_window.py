@@ -27,6 +27,23 @@ from search.analyzer import DocumentAnalyzer
 from search.duplicates import find_duplicates
 
 
+class SearchWorker(QThread):
+
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, query):
+        super().__init__()
+        self.query = query
+
+    def run(self):
+        try:
+            results = search_files(self.query)
+            self.finished.emit(results)
+        except Exception as error:
+            self.error.emit(str(error))
+
+
 class IndexWorker(QThread):
 
     progress = Signal(int, int, str, bool)
