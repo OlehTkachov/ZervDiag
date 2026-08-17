@@ -6,7 +6,7 @@ import tempfile
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
-
+from readers.ocr_reader import ocr_pdf
 
 def read_pdf(filepath):
     text = []
@@ -22,11 +22,13 @@ def read_pdf(filepath):
 
         result = "\n".join(text)
 
-        if not result.strip():
-            print(f"PDF_NO_TEXT_LAYER: {filepath}")
-            return ""
+        if result.strip():
+            return result
 
-        return result
+        print(f"PDF_NO_TEXT_LAYER: {filepath}")
+        print("Starting OCR...")
+
+        return ocr_pdf(filepath)
 
     except Exception as error:
         print(f"PDF_READ_ERROR: {filepath}: {error}")
