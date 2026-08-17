@@ -20,12 +20,17 @@ def read_pdf(filepath):
             if page_text:
                 text.append(page_text)
 
-    except Exception:
+        result = "\n".join(text)
+
+        if not result.strip():
+            print(f"PDF_NO_TEXT_LAYER: {filepath}")
+            return ""
+
+        return result
+
+    except Exception as error:
+        print(f"PDF_READ_ERROR: {filepath}: {error}")
         return ""
-
-    return "\n".join(text)
-
-
 def read_docx(filepath):
     text = []
 
