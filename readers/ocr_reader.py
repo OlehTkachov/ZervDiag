@@ -53,3 +53,32 @@ def ocr_pdf(filepath):
     except Exception as error:
         print(f"OCR_ERROR: {filepath}: {error}")
         return ""
+
+def ocr_image(filepath):
+    try:
+        result = subprocess.run(
+            [
+                TESSERACT,
+                str(filepath),
+                "stdout",
+                "-l",
+                "rus+eng",
+                "--psm",
+                "11",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            print(f"OCR_IMAGE_ERROR: {filepath}: {result.stderr}")
+            return ""
+
+        return result.stdout or ""
+
+    except Exception as error:
+        print(f"OCR_IMAGE_ERROR: {filepath}: {error}")
+        return ""

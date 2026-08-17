@@ -6,7 +6,7 @@ import tempfile
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
-from readers.ocr_reader import ocr_pdf
+from readers.ocr_reader import ocr_pdf, ocr_image
 
 def read_pdf(filepath):
     text = []
@@ -251,5 +251,8 @@ def read_document(filepath):
 
     if extension == ".xls":
         return read_xls(filepath)
+
+    if extension in {".jpg", ".jpeg", ".png"}:
+        return ocr_image(filepath)
 
     return ""
