@@ -2,188 +2,249 @@ import re
 
 from database.db import get_connection
 from search.search_result import SearchResult
-from indexer.single_file import index_single_file
 
 
-def normalize_text(text):
-    if not text:
-        return ""
+TECH_RE = re.compile(
+    r"(?=.*[A-Za-zА-Яа-яЁё])"
+    r"(?=.*\d)"
+    r"[A-Za-zА-Яа-яЁё0-9]"
+    r"[A-Za-zА-Яа-яЁё0-9._/+\\-]*"
+)
 
-    text = text.lower()
+ALPHA_RE = re.compile(r"^[A-Za-zА-Яа-яЁё]+$")
+DIGIT_OR_SUFFIX_RE = re.compile(r"^\d+[A-Za-zА-Яа-яЁё]*$")
 
-    # Убираем переносы строк внутри слов
-    text = re.sub(r"(?<=\w)-\s+", "", text)
+TECH_PREFIX_STOPWORDS = {
+    "в", "на", "за", "от", "до", "по", "и", "или",
+    "с", "со", "из", "для", "к", "о", "об", "про",
+    "при", "год", "года", "in", "on", "at", "by",
+    "of", "for", "to", "from", "and", "or", "with", "year",
+}
 
-    # Склеиваем характерные разрывы OCR/PDF:
-    # "аккум ул я тор" -> "аккумулятор"
-    previous = None
 
-    while previous != text:
-        previous = text
-
-        text = re.sub(
-            r"(?<=\w)\s+(?=\w)",
-            " ",
-            text
+def _raw_tokens(query):
+    return [
+        token.lower()
+        for token in re.findall(
+            r"[A-Za-zА-Яа-яЁё0-9._/+\\-]+",
+            query,
         )
-
-    # Дополнительно создаём вариант без пробелов
-    # для поиска слов, разбитых PDF-извлечением.
-    compact = re.sub(r"\s+", "", text)
-
-    return text + "\n" + compact
+        if token
+    ]
 
 
-def make_snippet(text, query, radius=150):
-    if not text:
-        return ""
-
-    normalized = normalize_text(text)
-    query = query.lower()
-
-    position = normalized.find(query)
-
-    if position == -1:
-        compact = re.sub(r"\s+", "", text.lower())
-        position = compact.find(re.sub(r"\s+", "", query))
-
-        if position == -1:
-            return ""
-
-        return "..." + text[:radius].replace("\n", " ") + "..."
-
-    start = max(0, position - radius)
-    end = min(len(normalized), position + len(query) + radius)
-
-    result = normalized[start:end].replace("\n", " ")
-
-    if start > 0:
-        result = "..." + result
-
-    if end < len(normalized):
-        result += "..."
-
-    return result
+def _compact(text):
+    return re.sub(
+        r"[^0-9a-zа-яё]+",
+        "",
+        (text or "").lower(),
+    )
 
 
-def matches(text, words):
-    normalized = normalize_text(text)
+def _is_tech_token(token):
+    return bool(TECH_RE.fullmatch(token))
 
-    for word in words:
-        if word not in normalized:
+
+def _can_be_tech_prefix(token):
+    compact = _compact(token)
+    return bool(
+        compact
+        and len(compact) <= 4
+        and compact not in TECH_PREFIX_STOPWORDS
+        and ALPHA_RE.fullmatch(compact)
+    )
+
+
+def _merge_technical_tokens(tokens):
+    """
+    Склеивает технические обозначения, разделённые пробелами.
+
+    AC 35L   -> AC35L
+    AC 35 L  -> AC35L
+    КС 55724 -> КС55724
+    ОНК 160  -> ОНК160
+    RT 100   -> RT100
+    """
+    merged = []
+    i = 0
+
+    while i < len(tokens):
+        first = tokens[i]
+
+        if i + 1 < len(tokens) and _can_be_tech_prefix(first):
+            second = _compact(tokens[i + 1])
+
+            if second and DIGIT_OR_SUFFIX_RE.fullmatch(second):
+                candidate = _compact(first) + second
+                consumed = 2
+
+                if i + 2 < len(tokens):
+                    third = _compact(tokens[i + 2])
+
+                    if (
+                        third
+                        and len(third) <= 2
+                        and ALPHA_RE.fullmatch(third)
+                    ):
+                        candidate += third
+                        consumed = 3
+
+                if _is_tech_token(candidate):
+                    merged.append(candidate)
+                    i += consumed
+                    continue
+
+        merged.append(first)
+        i += 1
+
+    return merged
+
+
+def _tokenize(query):
+    return _merge_technical_tokens(_raw_tokens(query))
+
+
+def query_requirements(query):
+    requirements = []
+
+    for token in _tokenize(query):
+        if _is_tech_token(token):
+            requirements.append(("tech", _compact(token)))
+        else:
+            requirements.append(("word", token))
+
+    return requirements
+
+
+def _requirement_matches_field(field, kind, value):
+    field = field or ""
+
+    if kind == "word":
+        return value in field.lower()
+
+    return value in _compact(field)
+
+
+def _matches_fields(fields, requirements):
+    """
+    Каждое условие должно встретиться хотя бы в одном поле:
+    имя, полный путь или содержимое.
+
+    Разные условия могут находиться в разных полях.
+    """
+    for kind, value in requirements:
+        if not any(
+            _requirement_matches_field(field, kind, value)
+            for field in fields
+        ):
             return False
 
     return True
 
 
-def search_files(query):
+def _tech_pattern(value):
+    return r"[\s._/+\\-]*".join(
+        re.escape(char)
+        for char in value
+    )
 
+
+def make_snippet(text, query, radius=180):
+    if not text:
+        return ""
+
+    for kind, value in query_requirements(query):
+        if kind == "word":
+            match = re.search(
+                re.escape(value),
+                text,
+                flags=re.IGNORECASE,
+            )
+        else:
+            match = re.search(
+                _tech_pattern(value),
+                text,
+                flags=re.IGNORECASE,
+            )
+
+        if not match:
+            continue
+
+        start = max(0, match.start() - radius)
+        end = min(len(text), match.end() + radius)
+
+        result = (
+            text[start:end]
+            .replace("\r", " ")
+            .replace("\n", " ")
+        )
+
+        if start > 0:
+            result = "..." + result
+
+        if end < len(text):
+            result += "..."
+
+        return result
+
+    return ""
+
+
+def _rough_sql_filter(requirements):
+    conditions = []
+    parameters = []
+
+    for kind, value in requirements:
+        if kind == "word":
+            pattern = f"%{value}%"
+        else:
+            prefix_match = re.match(r"[a-zа-яё]+", value)
+            prefix = (
+                prefix_match.group(0)
+                if prefix_match
+                else value[:2]
+            )
+            pattern = f"%{prefix}%"
+
+        conditions.append(
+            """
+            (
+                lower(filename) LIKE ?
+                OR lower(filepath) LIKE ?
+                OR lower(content) LIKE ?
+            )
+            """
+        )
+
+        parameters.extend([pattern, pattern, pattern])
+
+    return " AND ".join(conditions), parameters
+
+
+def search_files(query, limit=200):
+    """
+    Поиск только по SQLite.
+
+    Полный путь остаётся частью поиска, потому что структура
+    папок несёт смысловую информацию о документе.
+    """
     query = query.strip()
 
     if not query:
         return []
 
-    words = query.lower().split()
+    requirements = query_requirements(query)
+
+    if not requirements:
+        return []
+
+    conditions, parameters = _rough_sql_filter(requirements)
 
     conn = get_connection()
 
-    rows = conn.execute("""
-        SELECT
-            id,
-            filename,
-            extension,
-            filepath,
-            content,
-            is_cloud
-        FROM files
-        ORDER BY filepath
-    """).fetchall()
-
-    conn.close()
-
-    results = []
-    candidates = []
-
-    for row in rows:
-
-        file_id, filename, extension, filepath, content, is_cloud = row
-
-        filename = filename or ""
-        filepath = filepath or ""
-        content = content or ""
-
-        name_path = (
-            filename + " " + filepath
-        ).lower()
-
-        # Обычный поиск
-        if matches(
-            name_path + " " + content,
-            words
-        ):
-
-            snippet = make_snippet(
-                content,
-                query
-            )
-
-            if not snippet:
-                snippet = "Найдено в имени или пути файла"
-
-            results.append(
-                SearchResult(
-                    file_id=file_id,
-                    filename=filename,
-                    extension=extension,
-                    filepath=filepath,
-                    snippet=snippet,
-                    is_cloud=bool(is_cloud)
-                )
-            )
-
-            continue
-
-        # Cloud-документы: загружаем подходящие файлы
-        # и затем проверяем их содержимое.
-        significant_words = [
-            word for word in words
-            if len(word) >= 4
-        ]
-
-        if (
-            is_cloud
-            and extension.lower() in {
-                ".pdf", ".doc", ".docx", ".xls", ".xlsx"
-            }
-            and any(
-                word in name_path
-                for word in significant_words
-            )
-        ):
-            candidates.append(row)
-    # Индексируем только кандидатов
-    for row in candidates:
-
-        file_id = row[0]
-        filename = row[1]
-        filepath = row[3]
-
-        print("Загрузка:", filename)
-
-        try:
-            if not index_single_file(
-                file_id,
-                filepath
-            ):
-                continue
-
-        except Exception as error:
-            print("Ошибка:", error)
-            continue
-
-        conn = get_connection()
-
-        fresh = conn.execute("""
+    try:
+        rows = conn.execute(
+            f"""
             SELECT
                 id,
                 filename,
@@ -192,37 +253,53 @@ def search_files(query):
                 content,
                 is_cloud
             FROM files
-            WHERE id = ?
-        """, (file_id,)).fetchone()
-
+            WHERE {conditions}
+            LIMIT 2500
+            """,
+            parameters,
+        ).fetchall()
+    finally:
         conn.close()
 
-        if not fresh:
+    results = []
+
+    for row in rows:
+        (
+            file_id,
+            filename,
+            extension,
+            filepath,
+            content,
+            is_cloud,
+        ) = row
+
+        if not _matches_fields(
+            (
+                filename or "",
+                filepath or "",
+                content or "",
+            ),
+            requirements,
+        ):
             continue
 
-        content = fresh[4] or ""
+        snippet = make_snippet(content or "", query)
 
-        if matches(
-            (fresh[1] or "") + " " +
-            (fresh[3] or "") + " " +
-            content,
-            words
-        ):
+        if not snippet:
+            snippet = "Найдено в имени или пути файла"
 
-            snippet = make_snippet(
-                content,
-                query
+        results.append(
+            SearchResult(
+                file_id=file_id,
+                filename=filename or "",
+                extension=extension or "",
+                filepath=filepath or "",
+                snippet=snippet,
+                is_cloud=bool(is_cloud),
             )
+        )
 
-            results.append(
-                SearchResult(
-                    file_id=fresh[0],
-                    filename=fresh[1],
-                    extension=fresh[2],
-                    filepath=fresh[3],
-                    snippet=snippet,
-                    is_cloud=bool(fresh[5])
-                )
-            )
+        if len(results) >= limit:
+            break
 
     return results

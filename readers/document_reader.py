@@ -3,180 +3,222 @@ import shutil
 import subprocess
 import tempfile
 
-from pypdf import PdfReader
+import pymupdf
 from docx import Document
 from openpyxl import load_workbook
-from readers.ocr_reader import ocr_pdf, ocr_image
 
-def read_pdf(filepath):
-    text = []
+from readers.ocr_reader import (
+    ocr_image,
+)
+
+
+MIN_PDF_TEXT_CHARS = 80
+
+
+class OCRRequired(Exception):
+    def __init__(
+        self,
+        total_pages,
+        preview="",
+    ):
+        super().__init__(
+            "PDF requires OCR"
+        )
+
+        self.total_pages = int(
+            total_pages or 0
+        )
+
+        self.preview = (
+            preview or ""
+        )
+
+
+def read_pdf_text(
+    filepath,
+):
+    """
+    Читает ТОЛЬКО текстовый слой PDF.
+    OCR здесь намеренно не запускается.
+    """
+
+    doc = pymupdf.open(
+        filepath
+    )
 
     try:
-        reader = PdfReader(filepath)
+        total_pages = len(
+            doc
+        )
 
-        for page in reader.pages:
-            page_text = page.extract_text()
+        text = []
+
+        for page in doc:
+            page_text = page.get_text(
+                "text"
+            )
 
             if page_text:
-                text.append(page_text)
+                text.append(
+                    page_text
+                )
 
-        result = "\n".join(text)
+        result = "\n".join(
+            text
+        )
 
-        if result.strip():
-            return result
+    finally:
+        doc.close()
 
-        print(f"PDF_NO_TEXT_LAYER: {filepath}")
-        print("Starting OCR...")
+    if (
+        len(
+            result.strip()
+        )
+        >= MIN_PDF_TEXT_CHARS
+    ):
+        return result
 
-        return ocr_pdf(filepath)
+    raise OCRRequired(
+        total_pages=total_pages,
+        preview=result,
+    )
 
-    except Exception as error:
-        print(f"PDF_READ_ERROR: {filepath}: {error}")
-        return ""
-def read_docx(filepath):
+
+def read_docx(
+    filepath,
+):
     text = []
 
     try:
-        document = Document(filepath)
+        document = Document(
+            filepath
+        )
 
         for paragraph in document.paragraphs:
             if paragraph.text:
-                text.append(paragraph.text)
+                text.append(
+                    paragraph.text
+                )
 
         for table in document.tables:
             for row in table.rows:
                 for cell in row.cells:
                     if cell.text:
-                        text.append(cell.text)
+                        text.append(
+                            cell.text
+                        )
 
-    except Exception:
+    except Exception as error:
+        print(
+            f"DOCX_READ_ERROR: "
+            f"{filepath}: {error}",
+            flush=True,
+        )
         return ""
 
-    return "\n".join(text)
+    return "\n".join(
+        text
+    )
 
 
-def read_xlsx(filepath):
+def read_xlsx(
+    filepath,
+):
     text = []
 
     try:
         workbook = load_workbook(
             filepath,
             read_only=True,
-            data_only=True
+            data_only=True,
         )
 
         for sheet in workbook.worksheets:
-            text.append(f"\n[{sheet.title}]")
+            text.append(
+                f"\n[{sheet.title}]"
+            )
 
-            for row in sheet.iter_rows(values_only=True):
-                values = []
-
-                for value in row:
-                    if value is not None:
-                        values.append(str(value))
+            for row in sheet.iter_rows(
+                values_only=True
+            ):
+                values = [
+                    str(value)
+                    for value in row
+                    if value is not None
+                ]
 
                 if values:
-                    text.append(" | ".join(values))
+                    text.append(
+                        " | ".join(
+                            values
+                        )
+                    )
 
         workbook.close()
 
-    except Exception:
+    except Exception as error:
+        print(
+            f"XLSX_READ_ERROR: "
+            f"{filepath}: {error}",
+            flush=True,
+        )
         return ""
 
-    return "\n".join(text)
+    return "\n".join(
+        text
+    )
 
 
 def find_libreoffice():
-    """Находит LibreOffice в системе."""
-
-    soffice = shutil.which("soffice")
+    soffice = shutil.which(
+        "soffice"
+    )
 
     if soffice:
         return soffice
 
-    possible_paths = [
-        Path(r"C:\Program Files\LibreOffice\program\soffice.exe"),
-        Path(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
+    candidates = [
+        Path(
+            r"C:\Program Files\LibreOffice"
+            r"\program\soffice.exe"
+        ),
+        Path(
+            r"C:\Program Files (x86)\LibreOffice"
+            r"\program\soffice.exe"
+        ),
     ]
 
-    for path in possible_paths:
+    for path in candidates:
         if path.exists():
-            return str(path)
+            return str(
+                path
+            )
 
     return None
 
 
-def convert_with_libreoffice(filepath):
-    """
-    Конвертирует .doc/.xls во временный .docx/.xlsx
-    с помощью LibreOffice.
-    """
-
+def _convert_with_libreoffice(
+    filepath,
+    target_format,
+    target_suffix,
+):
     soffice = find_libreoffice()
 
     if not soffice:
-        return None
+        print(
+            "LIBREOFFICE_NOT_FOUND",
+            flush=True,
+        )
+        return None, None
 
-    source = Path(filepath)
-
-    converted_dir = Path(
-        tempfile.mkdtemp(prefix="zervdiag_convert_")
+    source = Path(
+        filepath
     )
-
-    try:
-        result = subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--convert-to",
-                "docx" if source.suffix.lower() == ".doc" else "xlsx",
-                "--outdir",
-                str(converted_dir),
-                str(source),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            return None
-
-        converted = converted_dir / (
-            source.stem
-            + (".docx" if source.suffix.lower() == ".doc" else ".xlsx")
-        )
-
-        if not converted.exists():
-            return None
-
-        return converted
-
-    except Exception:
-        return None
-
-
-def read_doc(filepath):
-    source = Path(filepath)
-
-    soffice = shutil.which("soffice")
-
-    if not soffice:
-        candidates = [
-            Path(r"C:\Program Files\LibreOffice\program\soffice.exe"),
-            Path(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
-        ]
-
-        for candidate in candidates:
-            if candidate.exists():
-                soffice = str(candidate)
-                break
-
-    if not soffice:
-        return ""
 
     output_dir = Path(
-        tempfile.mkdtemp(prefix="zervdiag_doc_")
+        tempfile.mkdtemp(
+            prefix="zervdiag_convert_"
+        )
     )
 
     try:
@@ -185,74 +227,244 @@ def read_doc(filepath):
                 soffice,
                 "--headless",
                 "--convert-to",
-                "txt:Text",
+                target_format,
                 "--outdir",
                 str(output_dir),
                 str(source),
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
 
         if result.returncode != 0:
-            return ""
+            print(
+                f"LIBREOFFICE_ERROR: "
+                f"{filepath}: {result.stderr}",
+                flush=True,
+            )
 
-        converted = output_dir / f"{source.stem}.txt"
+            shutil.rmtree(
+                output_dir,
+                ignore_errors=True,
+            )
 
-        if not converted.exists():
-            return ""
+            return None, None
 
-        return converted.read_text(
-            encoding="utf-8",
-            errors="replace",
+        candidates = list(
+            output_dir.glob(
+                f"*{target_suffix}"
+            )
         )
 
-    except Exception:
-        return ""
+        if not candidates:
+            print(
+                f"LIBREOFFICE_NO_OUTPUT: "
+                f"{filepath}",
+                flush=True,
+            )
 
-    finally:
+            shutil.rmtree(
+                output_dir,
+                ignore_errors=True,
+            )
+
+            return None, None
+
+        return (
+            candidates[0],
+            output_dir,
+        )
+
+    except Exception as error:
+        print(
+            f"LIBREOFFICE_EXCEPTION: "
+            f"{filepath}: {error}",
+            flush=True,
+        )
+
         shutil.rmtree(
             output_dir,
             ignore_errors=True,
         )
 
+        return None, None
 
-def read_xls(filepath):
-    converted = convert_with_libreoffice(filepath)
+
+def read_doc(
+    filepath,
+):
+    converted, directory = (
+        _convert_with_libreoffice(
+            filepath,
+            "txt:Text",
+            ".txt",
+        )
+    )
 
     if not converted:
         return ""
 
     try:
-        return read_xlsx(converted)
+        return converted.read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
 
     finally:
         shutil.rmtree(
-            converted.parent,
-            ignore_errors=True
+            directory,
+            ignore_errors=True,
         )
 
 
-def read_document(filepath):
-    extension = Path(filepath).suffix.lower()
+def read_xls(
+    filepath,
+):
+    converted, directory = (
+        _convert_with_libreoffice(
+            filepath,
+            "xlsx",
+            ".xlsx",
+        )
+    )
+
+    if not converted:
+        return ""
+
+    try:
+        return read_xlsx(
+            converted
+        )
+
+    finally:
+        shutil.rmtree(
+            directory,
+            ignore_errors=True,
+        )
+
+
+def read_odt(
+    filepath,
+):
+    return read_doc(
+        filepath
+    )
+
+
+def read_ods(
+    filepath,
+):
+    return read_xls(
+        filepath
+    )
+
+
+def read_text(
+    filepath,
+):
+    path = Path(
+        filepath
+    )
+
+    for encoding in (
+        "utf-8-sig",
+        "utf-8",
+        "cp1251",
+        "cp866",
+        "latin-1",
+    ):
+        try:
+            return path.read_text(
+                encoding=encoding
+            )
+
+        except UnicodeDecodeError:
+            continue
+
+        except Exception as error:
+            print(
+                f"TEXT_READ_ERROR: "
+                f"{filepath}: {error}",
+                flush=True,
+            )
+            return ""
+
+    return ""
+
+
+def read_document(
+    filepath,
+    stop_callback=None,
+):
+    """
+    Быстрое извлечение для ОСНОВНОЙ индексации.
+
+    Важно:
+    PDF без нормального текстового слоя вызывает
+    OCRRequired и НЕ запускает OCR.
+    """
+
+    extension = Path(
+        filepath
+    ).suffix.lower()
 
     if extension == ".pdf":
-        return read_pdf(filepath)
+        return read_pdf_text(
+            filepath
+        )
 
     if extension == ".docx":
-        return read_docx(filepath)
+        return read_docx(
+            filepath
+        )
 
     if extension == ".doc":
-        return read_doc(filepath)
+        return read_doc(
+            filepath
+        )
 
     if extension == ".xlsx":
-        return read_xlsx(filepath)
+        return read_xlsx(
+            filepath
+        )
 
     if extension == ".xls":
-        return read_xls(filepath)
+        return read_xls(
+            filepath
+        )
 
-    if extension in {".jpg", ".jpeg", ".png"}:
-        return ocr_image(filepath)
+    if extension == ".odt":
+        return read_odt(
+            filepath
+        )
+
+    if extension == ".ods":
+        return read_ods(
+            filepath
+        )
+
+    if extension in {
+        ".txt",
+        ".csv",
+        ".json",
+    }:
+        return read_text(
+            filepath
+        )
+
+    if extension in {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".tif",
+        ".tiff",
+    }:
+        return ocr_image(
+            filepath,
+            stop_callback=stop_callback,
+        )
 
     return ""

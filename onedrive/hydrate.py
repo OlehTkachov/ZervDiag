@@ -1,55 +1,134 @@
-﻿import ctypes
-from ctypes import wintypes
-
-cldapi = ctypes.WinDLL("cldapi.dll", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-GENERIC_READ = 0x80000000
-FILE_SHARE_READ = 0x00000001
-FILE_SHARE_WRITE = 0x00000002
-OPEN_EXISTING = 3
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 
-def hydrate_file(path, length=None):
+_WORKER = (
+    Path(__file__)
+    .resolve()
+    .with_name("cloud_worker.py")
+)
+
+
+def _run_cloud_worker(
+    command,
+    path,
+    timeout,
+):
     path = str(path)
 
-    kernel32.CreateFileW.restype = wintypes.HANDLE
-
-    handle = kernel32.CreateFileW(
-        path,
-        GENERIC_READ,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        None,
-        OPEN_EXISTING,
-        0,
-        None,
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_WORKER),
+            command,
+            path,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
     )
 
-    if handle == wintypes.HANDLE(-1).value:
-        raise OSError(ctypes.get_last_error(), "CreateFileW failed")
-
-    try:
-        if length is None:
-            import os
-            length = os.path.getsize(path)
-
-        cldapi.CfHydratePlaceholder.restype = wintypes.HRESULT
-
-        result = cldapi.CfHydratePlaceholder(
-            handle,
-            0,
-            length,
-            0,
-            None,
+    if result.returncode != 0:
+        message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"{command} failed"
         )
 
-        if result != 0:
-            raise OSError(
-                result & 0xFFFFFFFF,
-                "CfHydratePlaceholder failed"
+        raise RuntimeError(message)
+
+    return True
+
+
+def hydrate_file(
+    path,
+    length=None,
+    timeout=300,
+):
+    """
+    Загружает OneDrive placeholder.
+
+    Hydrate выполняется в отдельном процессе,
+    поэтому зависание Cloud Files API не блокирует ZervDiag.
+    """
+
+    if os.name != "nt":
+        return True
+
+    return _run_cloud_worker(
+        "hydrate",
+        path,
+        timeout,
+    )
+
+
+def dehydrate_file(
+    path,
+    length=None,
+    timeout=20,
+):
+    """
+    Возвращает файл под управление OneDrive без прямого
+    CfDehydratePlaceholder.
+
+    attrib +U -P — эквивалент команды OneDrive
+    "Освободить место": файл помечается unpinned и OneDrive
+    может удалить локальные данные без 30-секундного зависания
+    CfDehydratePlaceholder.
+
+    Физическое освобождение места OneDrive может выполнить
+    не мгновенно, но ZervDiag ждать этого не должен.
+    """
+
+    if os.name != "nt":
+        return True
+
+    try:
+        result = subprocess.run(
+            [
+                "attrib",
+                "+U",
+                "-P",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+
+        if result.returncode != 0:
+            message = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or "attrib +U -P failed"
             )
+
+            print(
+                f"WARNING: OneDrive release failed: "
+                f"{path}: {message}",
+                flush=True,
+            )
+
+            return False
+
+        print(
+            f"Released to OneDrive: {path}",
+            flush=True,
+        )
 
         return True
 
-    finally:
-        kernel32.CloseHandle(handle)
+    except Exception as error:
+        print(
+            f"WARNING: OneDrive release error: "
+            f"{path}: {error}",
+            flush=True,
+        )
+
+        return False

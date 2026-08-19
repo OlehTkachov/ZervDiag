@@ -6,4 +6,9 @@ data/
 *.db
 
 .vscode/
-.idea/
+.idea/data/*.db
+data/*.db-wal
+data/*.db-shm
+backup_before_*/
+**/__pycache__/
+search/search.py.before_deep

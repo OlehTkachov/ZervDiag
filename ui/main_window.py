@@ -1,116 +1,261 @@
 import os
 
-from PySide6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLineEdit,
-    QLabel,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QFileDialog,
-)
-
 from PySide6.QtCore import (
+    QSettings,
     QThread,
     Signal,
-    QSettings,
+)
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from database.db import create_database
-from indexer.indexer import index_folder
-from search.search import search_files
-from search.analyzer import DocumentAnalyzer
-from search.duplicates import find_duplicates
+from database.db import (
+    create_database,
+    get_ocr_pending_count,
+    get_status_counts,
+)
+from indexer.indexer import (
+    index_folder,
+)
+from indexer.ocr_queue import (
+    process_ocr_queue,
+)
+from search.duplicates import (
+    find_duplicates,
+)
+from search.search import (
+    search_files,
+)
 
 
 class SearchWorker(QThread):
+    finished_results = Signal(
+        list
+    )
+    error = Signal(
+        str
+    )
 
-    finished = Signal(list)
-    error = Signal(str)
+    def __init__(
+        self,
+        query,
+        parent=None,
+    ):
+        super().__init__(
+            parent
+        )
 
-    def __init__(self, query):
-        super().__init__()
         self.query = query
 
     def run(self):
         try:
-            results = search_files(self.query)
-            self.finished.emit(results)
+            self.finished_results.emit(
+                search_files(
+                    self.query
+                )
+            )
+
         except Exception as error:
-            self.error.emit(str(error))
+            self.error.emit(
+                str(error)
+            )
 
 
 class IndexWorker(QThread):
+    progress = Signal(
+        int,
+        int,
+        str,
+        bool,
+    )
 
-    progress = Signal(int, int, str, bool)
-    finished = Signal(int, int, int, int, int)
-    error = Signal(str)
+    finished_index = Signal(
+        int,
+        int,
+        int,
+        int,
+        int,
+        bool,
+    )
 
-    def __init__(self, folder):
-        super().__init__()
+    error = Signal(
+        str
+    )
+
+    def __init__(
+        self,
+        folder,
+        parent=None,
+    ):
+        super().__init__(
+            parent
+        )
+
         self.folder = folder
+        self._stop_requested = False
 
-    def run(self):
+    def request_stop(
+        self,
+    ):
+        self._stop_requested = True
 
-        try:
-
-            result = index_folder(
-                self.folder,
-                self.report_progress
-            )
-
-            self.finished.emit(*result)
-
-        except Exception as error:
-
-            self.error.emit(str(error))
+    def should_stop(
+        self,
+    ):
+        return (
+            self._stop_requested
+        )
 
     def report_progress(
         self,
         current,
         total,
         filename,
-        cloud
+        cloud,
     ):
-
         self.progress.emit(
             current,
             total,
             filename,
-            cloud
+            cloud,
         )
 
-
-class DuplicateWorker(QThread):
-
-    finished = Signal(list)
-    error = Signal(str)
-
-    def run(self):
-
+    def run(
+        self,
+    ):
         try:
+            result = index_folder(
+                self.folder,
+                progress_callback=self.report_progress,
+                stop_callback=self.should_stop,
+            )
 
-            duplicates = find_duplicates()
-
-            self.finished.emit(
-                duplicates
+            self.finished_index.emit(
+                *result,
+                self._stop_requested,
             )
 
         except Exception as error:
+            self.error.emit(
+                str(error)
+            )
 
+
+class OCRWorker(QThread):
+    progress = Signal(
+        int,
+        int,
+        str,
+        int,
+        int,
+    )
+
+    finished_ocr = Signal(
+        int,
+        int,
+        int,
+        bool,
+    )
+
+    error = Signal(
+        str
+    )
+
+    def __init__(
+        self,
+        parent=None,
+    ):
+        super().__init__(
+            parent
+        )
+
+        self._stop_requested = False
+
+    def request_stop(
+        self,
+    ):
+        self._stop_requested = True
+
+    def should_stop(
+        self,
+    ):
+        return (
+            self._stop_requested
+        )
+
+    def report_progress(
+        self,
+        file_number,
+        file_total,
+        filename,
+        page_number,
+        page_total,
+    ):
+        self.progress.emit(
+            file_number,
+            file_total,
+            filename,
+            page_number,
+            page_total,
+        )
+
+    def run(
+        self,
+    ):
+        try:
+            result = (
+                process_ocr_queue(
+                    progress_callback=self.report_progress,
+                    stop_callback=self.should_stop,
+                )
+            )
+
+            self.finished_ocr.emit(
+                *result
+            )
+
+        except Exception as error:
+            self.error.emit(
+                str(error)
+            )
+
+
+class DuplicateWorker(QThread):
+    finished_results = Signal(
+        list
+    )
+    error = Signal(
+        str
+    )
+
+    def run(
+        self,
+    ):
+        try:
+            self.finished_results.emit(
+                find_duplicates()
+            )
+
+        except Exception as error:
             self.error.emit(
                 str(error)
             )
 
 
 class MainWindow(QMainWindow):
-
-    def __init__(self):
-
+    def __init__(
+        self,
+    ):
         super().__init__()
 
         self.setWindowTitle(
@@ -119,28 +264,30 @@ class MainWindow(QMainWindow):
 
         self.resize(
             1600,
-            850
+            850,
         )
 
-        self.worker = None
-        self.analyzer = None
+        self.index_worker = None
+        self.ocr_worker = None
+        self.search_worker = None
         self.duplicate_worker = None
 
         self.current_results = []
 
         self.settings = QSettings(
             "ZervDiag",
-            "ZervDiag"
+            "ZervDiag",
         )
 
         create_database()
 
         self.create_ui()
-
         self.load_settings()
+        self.update_ocr_button()
 
-    def create_ui(self):
-
+    def create_ui(
+        self,
+    ):
         central = QWidget()
 
         self.setCentralWidget(
@@ -150,8 +297,6 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(
             central
         )
-
-        # Левая панель
 
         left_panel = QVBoxLayout()
 
@@ -173,12 +318,12 @@ class MainWindow(QMainWindow):
             "Индексация"
         )
 
-        self.btn_folder = QPushButton(
-            "Выбрать папку"
+        self.btn_ocr = QPushButton(
+            "OCR очередь"
         )
 
-        self.btn_analyze = QPushButton(
-            "Анализировать найденные"
+        self.btn_folder = QPushButton(
+            "Выбрать папку"
         )
 
         self.btn_duplicates = QPushButton(
@@ -189,46 +334,35 @@ class MainWindow(QMainWindow):
             "Настройки"
         )
 
-        self.btn_analyze.setEnabled(
-            False
-        )
-
         left_panel.addWidget(
             title
         )
-
         left_panel.addWidget(
             self.btn_search
         )
-
         left_panel.addWidget(
             self.btn_index
         )
-
+        left_panel.addWidget(
+            self.btn_ocr
+        )
         left_panel.addWidget(
             self.btn_folder
         )
-
-        left_panel.addWidget(
-            self.btn_analyze
-        )
-
         left_panel.addWidget(
             self.btn_duplicates
         )
-
         left_panel.addWidget(
             self.btn_settings
         )
-
         left_panel.addStretch()
-
-        # Правая панель
 
         right_panel = QVBoxLayout()
 
-        folder_title = QLabel(
-            "Папка документации:"
+        right_panel.addWidget(
+            QLabel(
+                "Папка документации:"
+            )
         )
 
         self.folder_label = QLabel(
@@ -240,21 +374,15 @@ class MainWindow(QMainWindow):
         )
 
         right_panel.addWidget(
-            folder_title
-        )
-
-        right_panel.addWidget(
             self.folder_label
         )
-
-        # Поиск
 
         search_layout = QHBoxLayout()
 
         self.search_input = QLineEdit()
 
         self.search_input.setPlaceholderText(
-            "КС 55724, ОНК160, Е10..."
+            "КС 55724, ОНК160, E10, Terex AC35L..."
         )
 
         self.search_button = QPushButton(
@@ -273,47 +401,50 @@ class MainWindow(QMainWindow):
             search_layout
         )
 
-        # Таблица
-
         self.results = QTableWidget()
 
         self.results.setColumnCount(
             5
         )
 
-        self.results.setHorizontalHeaderLabels([
-            "Файл",
-            "Тип",
-            "Статус",
-            "Фрагмент",
-            "Полный путь",
-        ])
+        self.results.setHorizontalHeaderLabels(
+            [
+                "Файл",
+                "Тип",
+                "Статус",
+                "Фрагмент",
+                "Полный путь",
+            ]
+        )
 
-        header = self.results.horizontalHeader()
+        header = (
+            self.results
+            .horizontalHeader()
+        )
 
         header.setSectionResizeMode(
             0,
-            QHeaderView.ResizeToContents
+            QHeaderView.ResizeToContents,
         )
 
         header.setSectionResizeMode(
             1,
-            QHeaderView.ResizeToContents
+            QHeaderView.ResizeToContents,
         )
 
         header.setSectionResizeMode(
             2,
-            QHeaderView.ResizeToContents
+            QHeaderView.ResizeToContents,
         )
 
         header.setSectionResizeMode(
             3,
-            QHeaderView.Stretch
+            QHeaderView.Stretch,
         )
 
         header.setSectionResizeMode(
             4,
-            QHeaderView.Stretch
+            QHeaderView.Stretch,
         )
 
         self.results.setSelectionBehavior(
@@ -327,8 +458,6 @@ class MainWindow(QMainWindow):
         right_panel.addWidget(
             self.results
         )
-
-        # Статус
 
         self.status = QLabel(
             "Готово"
@@ -344,22 +473,24 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(
             left_panel,
-            1
+            1,
         )
 
         main_layout.addLayout(
             right_panel,
-            7
+            7,
         )
-
-        # Сигналы
 
         self.btn_folder.clicked.connect(
             self.select_folder
         )
 
         self.btn_index.clicked.connect(
-            self.start_indexing
+            self.toggle_indexing
+        )
+
+        self.btn_ocr.clicked.connect(
+            self.toggle_ocr
         )
 
         self.search_button.clicked.connect(
@@ -368,10 +499,6 @@ class MainWindow(QMainWindow):
 
         self.btn_search.clicked.connect(
             self.perform_search
-        )
-
-        self.btn_analyze.clicked.connect(
-            self.start_analysis
         )
 
         self.btn_duplicates.clicked.connect(
@@ -386,48 +513,66 @@ class MainWindow(QMainWindow):
             self.open_file
         )
 
-    def load_settings(self):
-
+    def load_settings(
+        self,
+    ):
         folder = self.settings.value(
             "documentation_folder",
-            ""
+            "",
         )
 
         if (
             folder
-            and os.path.exists(folder)
+            and os.path.exists(
+                folder
+            )
         ):
-
             self.folder_label.setText(
                 folder
             )
 
         else:
-
             self.folder_label.setText(
                 "Папка не выбрана"
             )
 
-    def select_folder(self):
+    def update_ocr_button(
+        self,
+    ):
+        try:
+            count = (
+                get_ocr_pending_count()
+            )
 
-        current_folder = self.settings.value(
-            "documentation_folder",
-            ""
+        except Exception:
+            count = 0
+
+        self.btn_ocr.setText(
+            f"OCR очередь ({count})"
         )
 
-        if (
-            not current_folder
-            or not os.path.exists(
+        return count
+
+    def select_folder(
+        self,
+    ):
+        current_folder = self.settings.value(
+            "documentation_folder",
+            "",
+        )
+
+        if not (
+            current_folder
+            and os.path.exists(
                 current_folder
             )
         ):
-
             current_folder = ""
 
         folder = QFileDialog.getExistingDirectory(
             self,
             "Выберите папку с документацией",
-            current_folder
+            current_folder,
         )
 
         if not folder:
@@ -435,7 +580,7 @@ class MainWindow(QMainWindow):
 
         self.settings.setValue(
             "documentation_folder",
-            folder
+            folder,
         )
 
         self.folder_label.setText(
@@ -446,86 +591,129 @@ class MainWindow(QMainWindow):
             "Папка сохранена"
         )
 
-    # -------------------------------------------------
-    # Индексация
-    # -------------------------------------------------
+    # ---------------------------
+    # Быстрая индексация
+    # ---------------------------
 
-    def start_indexing(self):
+    def toggle_indexing(
+        self,
+    ):
+        if (
+            self.index_worker
+            and self.index_worker.isRunning()
+        ):
+            self.index_worker.request_stop()
 
+            self.btn_index.setEnabled(
+                False
+            )
+
+            self.status.setText(
+                "Остановка индексации "
+                "после текущего файла..."
+            )
+
+            return
+
+        self.start_indexing()
+
+    def start_indexing(
+        self,
+    ):
         folder = self.settings.value(
             "documentation_folder",
-            ""
+            "",
         )
 
         if not folder:
-
             self.status.setText(
                 "Сначала выберите папку"
             )
-
             return
 
-        if not os.path.exists(folder):
-
+        if not os.path.exists(
+            folder
+        ):
             self.status.setText(
                 "Папка не найдена"
             )
-
             return
 
-        self.btn_index.setEnabled(False)
-        self.btn_folder.setEnabled(False)
-        self.search_button.setEnabled(False)
-        self.btn_analyze.setEnabled(False)
-        self.btn_duplicates.setEnabled(False)
+        if (
+            self.ocr_worker
+            and self.ocr_worker.isRunning()
+        ):
+            self.status.setText(
+                "Сначала остановите OCR"
+            )
+            return
+
+        self.btn_index.setText(
+            "Остановить индексацию"
+        )
+
+        self.btn_folder.setEnabled(
+            False
+        )
+
+        self.btn_ocr.setEnabled(
+            False
+        )
+
+        self.btn_duplicates.setEnabled(
+            False
+        )
 
         self.status.setText(
-            "Индексация: 0%"
+            "Быстрая индексация: 0%"
         )
 
-        self.worker = IndexWorker(
-            folder
+        self.index_worker = IndexWorker(
+            folder,
+            self,
         )
 
-        self.worker.progress.connect(
+        self.index_worker.progress.connect(
             self.indexing_progress
         )
 
-        self.worker.finished.connect(
+        self.index_worker.finished_index.connect(
             self.indexing_finished
         )
 
-        self.worker.error.connect(
+        self.index_worker.error.connect(
             self.indexing_error
         )
 
-        self.worker.start()
+        self.index_worker.start()
 
     def indexing_progress(
         self,
         current,
         total,
         filename,
-        cloud
+        cloud,
     ):
-
         percent = (
-            int(current * 100 / total)
+            current
+            * 100.0
+            / total
             if total
-            else 100
+            else 100.0
         )
 
-        status = (
+        state = (
             "облачный"
             if cloud
             else "локальный"
         )
 
         self.status.setText(
-            f"Индексация: {percent}% — "
+            f"Быстрая индексация: "
+            f"{percent:.1f}% — "
             f"{current} / {total}\n"
             f"{filename}\n"
-            f"Статус: {status}"
+            f"Статус: {state}"
         )
 
     def indexing_finished(
@@ -534,281 +722,126 @@ class MainWindow(QMainWindow):
         updated,
         skipped,
         deleted,
-        total
+        total,
+        stopped,
     ):
+        self._index_controls_ready()
 
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
-        self.search_button.setEnabled(True)
-        self.btn_duplicates.setEnabled(True)
-
-        self.status.setText(
-            f"Готово. Всего: {total}. "
-            f"Новых: {added}. "
-            f"Изменено: {updated}. "
-            f"Без изменений: {skipped}. "
-            f"Удалено: {deleted}."
+        prefix = (
+            "Индексация остановлена."
+            if stopped
+            else "Быстрая индексация завершена."
         )
 
-        self.worker.deleteLater()
-        self.worker = None
+        ocr_count = (
+            self.update_ocr_button()
+        )
+
+        counts = get_status_counts()
+
+        self.status.setText(
+            f"{prefix} "
+            f"Всего: {total}. "
+            f"Новых: {added}. "
+            f"Обработано/изменено: {updated}. "
+            f"Пропущено: {skipped}. "
+            f"Удалено: {deleted}. "
+            f"OCR ожидают: {ocr_count}. "
+            f"OK: {counts.get('ok', 0)}."
+        )
+
+        if self.index_worker:
+            self.index_worker.deleteLater()
+            self.index_worker = None
 
     def indexing_error(
         self,
-        message
+        message,
     ):
-
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
-        self.search_button.setEnabled(True)
-        self.btn_duplicates.setEnabled(True)
+        self._index_controls_ready()
 
         self.status.setText(
-            f"Ошибка: {message}"
+            f"Ошибка индексации: "
+            f"{message}"
         )
 
-        self.worker.deleteLater()
-        self.worker = None
+        if self.index_worker:
+            self.index_worker.deleteLater()
+            self.index_worker = None
 
-    # -------------------------------------------------
-    # Поиск
-    # -------------------------------------------------
-
-    def perform_search(self):
-
-        query = self.search_input.text()
-
-        if not query.strip():
-
-            self.status.setText(
-                "Введите запрос"
-            )
-
-            return
-
-        self.status.setText(
-            "Поиск..."
-        )
-
-        results = search_files(
-            query
-        )
-
-        self.current_results = results
-
-        self.results.setRowCount(0)
-
-        cloud_count = 0
-
-        for row, result in enumerate(
-            results
-        ):
-
-            self.results.insertRow(row)
-
-            self.results.setItem(
-                row,
-                0,
-                QTableWidgetItem(
-                    result.filename
-                )
-            )
-
-            self.results.setItem(
-                row,
-                1,
-                QTableWidgetItem(
-                    result.extension
-                )
-            )
-
-            if result.is_cloud:
-
-                status = "☁ Облако"
-
-                cloud_count += 1
-
-            else:
-
-                status = "💾 Локальный"
-
-            self.results.setItem(
-                row,
-                2,
-                QTableWidgetItem(
-                    status
-                )
-            )
-
-            self.results.setItem(
-                row,
-                3,
-                QTableWidgetItem(
-                    result.snippet
-                )
-            )
-
-            self.results.setItem(
-                row,
-                4,
-                QTableWidgetItem(
-                    result.filepath
-                )
-            )
-
-        self.btn_analyze.setEnabled(
-            cloud_count > 0
-        )
-
-        self.status.setText(
-            f"Найдено уникальных файлов: "
-            f"{len(results)}. "
-            f"Облачных: {cloud_count}."
-        )
-
-    # -------------------------------------------------
-    # Анализ
-    # -------------------------------------------------
-
-    def start_analysis(self):
-
-        if not self.current_results:
-
-            self.status.setText(
-                "Нет найденных документов"
-            )
-
-            return
-
-        files = []
-        seen_paths = set()
-
-        for result in self.current_results:
-
-            if not result.is_cloud:
-                continue
-
-            path = result.filepath.strip().lower()
-
-            if path in seen_paths:
-                continue
-
-            seen_paths.add(path)
-
-            files.append({
-                "id": result.file_id,
-                "filename": result.filename,
-                "filepath": result.filepath,
-		"is_cloud": result.is_cloud,
-            })
-
-        if not files:
-
-            self.status.setText(
-                "Облачных документов нет"
-            )
-
-            return
-
-        self.btn_analyze.setEnabled(False)
-        self.search_button.setEnabled(False)
-        self.btn_index.setEnabled(False)
-        self.btn_folder.setEnabled(False)
-        self.btn_duplicates.setEnabled(False)
-
-        self.status.setText(
-            f"Анализ: 0 / {len(files)}"
-        )
-
-        self.analyzer = DocumentAnalyzer(
-            files
-        )
-
-        self.analyzer.progress.connect(
-            self.analysis_progress
-        )
-
-        self.analyzer.finished.connect(
-            self.analysis_finished
-        )
-
-        self.analyzer.error.connect(
-            self.analysis_error
-        )
-
-        self.analyzer.start()
-
-    def analysis_progress(
+    def _index_controls_ready(
         self,
-        current,
-        total,
-        filename
     ):
-
-        percent = (
-            int(current * 100 / total)
-            if total
-            else 100
+        self.btn_index.setEnabled(
+            True
         )
 
-        self.status.setText(
-            f"Анализ: {percent}% — "
-            f"{current} / {total}\n"
-            f"{filename}"
+        self.btn_index.setText(
+            "Индексация"
         )
 
-    def analysis_finished(
-        self,
-        analyzed,
-        total
-    ):
-
-        self.btn_analyze.setEnabled(True)
-        self.search_button.setEnabled(True)
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
-        self.btn_duplicates.setEnabled(True)
-
-        self.status.setText(
-            f"Анализ завершён. "
-            f"Обработано: {analyzed} / {total}"
+        self.btn_folder.setEnabled(
+            True
         )
 
-        self.analyzer.deleteLater()
-        self.analyzer = None
-
-    def analysis_error(
-        self,
-        message
-    ):
-
-        self.btn_analyze.setEnabled(True)
-        self.search_button.setEnabled(True)
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
-        self.btn_duplicates.setEnabled(True)
-
-        self.status.setText(
-            f"Ошибка анализа: {message}"
+        self.btn_ocr.setEnabled(
+            True
         )
-
-        if self.analyzer:
-
-            self.analyzer.deleteLater()
-            self.analyzer = None
-
-    # -------------------------------------------------
-    # Поиск клонов
-    # -------------------------------------------------
-
-    def start_duplicate_search(self):
 
         self.btn_duplicates.setEnabled(
-            False
+            True
         )
 
-        self.btn_search.setEnabled(
-            False
+    # ---------------------------
+    # OCR очередь
+    # ---------------------------
+
+    def toggle_ocr(
+        self,
+    ):
+        if (
+            self.ocr_worker
+            and self.ocr_worker.isRunning()
+        ):
+            self.ocr_worker.request_stop()
+
+            self.btn_ocr.setEnabled(
+                False
+            )
+
+            self.status.setText(
+                "Остановка OCR после "
+                "текущей страницы..."
+            )
+
+            return
+
+        self.start_ocr()
+
+    def start_ocr(
+        self,
+    ):
+        if (
+            self.index_worker
+            and self.index_worker.isRunning()
+        ):
+            self.status.setText(
+                "Сначала остановите индексацию"
+            )
+            return
+
+        count = (
+            self.update_ocr_button()
+        )
+
+        if count <= 0:
+            self.status.setText(
+                "OCR очередь пуста"
+            )
+            return
+
+        self.btn_ocr.setText(
+            "Остановить OCR"
         )
 
         self.btn_index.setEnabled(
@@ -819,7 +852,297 @@ class MainWindow(QMainWindow):
             False
         )
 
-        self.btn_analyze.setEnabled(
+        self.btn_duplicates.setEnabled(
+            False
+        )
+
+        self.status.setText(
+            f"OCR очередь: "
+            f"{count} файлов"
+        )
+
+        self.ocr_worker = OCRWorker(
+            self
+        )
+
+        self.ocr_worker.progress.connect(
+            self.ocr_progress
+        )
+
+        self.ocr_worker.finished_ocr.connect(
+            self.ocr_finished
+        )
+
+        self.ocr_worker.error.connect(
+            self.ocr_error
+        )
+
+        self.ocr_worker.start()
+
+    def ocr_progress(
+        self,
+        file_number,
+        file_total,
+        filename,
+        page_number,
+        page_total,
+    ):
+        page_percent = (
+            page_number
+            * 100.0
+            / page_total
+            if page_total
+            else 0.0
+        )
+
+        self.status.setText(
+            f"OCR: файл "
+            f"{file_number}/{file_total}\n"
+            f"{filename}\n"
+            f"Страница "
+            f"{page_number}/{page_total} "
+            f"({page_percent:.1f}%)"
+        )
+
+    def ocr_finished(
+        self,
+        processed,
+        errors,
+        total,
+        stopped,
+    ):
+        self._ocr_controls_ready()
+
+        remaining = (
+            self.update_ocr_button()
+        )
+
+        prefix = (
+            "OCR остановлен."
+            if stopped
+            else "OCR очередь завершена."
+        )
+
+        self.status.setText(
+            f"{prefix} "
+            f"Готово: {processed}. "
+            f"Ошибок: {errors}. "
+            f"Было в очереди: {total}. "
+            f"Осталось: {remaining}."
+        )
+
+        if self.ocr_worker:
+            self.ocr_worker.deleteLater()
+            self.ocr_worker = None
+
+    def ocr_error(
+        self,
+        message,
+    ):
+        self._ocr_controls_ready()
+
+        self.update_ocr_button()
+
+        self.status.setText(
+            f"Ошибка OCR: "
+            f"{message}"
+        )
+
+        if self.ocr_worker:
+            self.ocr_worker.deleteLater()
+            self.ocr_worker = None
+
+    def _ocr_controls_ready(
+        self,
+    ):
+        self.btn_ocr.setEnabled(
+            True
+        )
+
+        self.btn_index.setEnabled(
+            True
+        )
+
+        self.btn_folder.setEnabled(
+            True
+        )
+
+        self.btn_duplicates.setEnabled(
+            True
+        )
+
+    # ---------------------------
+    # Поиск
+    # ---------------------------
+
+    def perform_search(
+        self,
+    ):
+        query = (
+            self.search_input
+            .text()
+            .strip()
+        )
+
+        if not query:
+            self.status.setText(
+                "Введите запрос"
+            )
+            return
+
+        if (
+            self.search_worker
+            and self.search_worker.isRunning()
+        ):
+            return
+
+        self.status.setText(
+            f"Поиск: {query}"
+        )
+
+        self.search_button.setEnabled(
+            False
+        )
+
+        self.btn_search.setEnabled(
+            False
+        )
+
+        self.search_worker = SearchWorker(
+            query,
+            self,
+        )
+
+        self.search_worker.finished_results.connect(
+            self.search_finished
+        )
+
+        self.search_worker.error.connect(
+            self.search_error
+        )
+
+        self.search_worker.start()
+
+    def search_finished(
+        self,
+        results,
+    ):
+        self.current_results = (
+            results
+        )
+
+        self.results.setRowCount(
+            0
+        )
+
+        cloud_count = 0
+
+        for row, result in enumerate(
+            results
+        ):
+            self.results.insertRow(
+                row
+            )
+
+            self.results.setItem(
+                row,
+                0,
+                QTableWidgetItem(
+                    result.filename
+                ),
+            )
+
+            self.results.setItem(
+                row,
+                1,
+                QTableWidgetItem(
+                    result.extension
+                ),
+            )
+
+            if result.is_cloud:
+                state = "☁ Облако"
+                cloud_count += 1
+            else:
+                state = "💾 Локальный"
+
+            self.results.setItem(
+                row,
+                2,
+                QTableWidgetItem(
+                    state
+                ),
+            )
+
+            self.results.setItem(
+                row,
+                3,
+                QTableWidgetItem(
+                    result.snippet
+                ),
+            )
+
+            self.results.setItem(
+                row,
+                4,
+                QTableWidgetItem(
+                    result.filepath
+                ),
+            )
+
+        self.search_button.setEnabled(
+            True
+        )
+
+        self.btn_search.setEnabled(
+            True
+        )
+
+        self.status.setText(
+            f"Найдено: "
+            f"{len(results)}. "
+            f"Cloud: {cloud_count}."
+        )
+
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
+
+    def search_error(
+        self,
+        message,
+    ):
+        self.search_button.setEnabled(
+            True
+        )
+
+        self.btn_search.setEnabled(
+            True
+        )
+
+        self.status.setText(
+            f"Ошибка поиска: "
+            f"{message}"
+        )
+
+        if self.search_worker:
+            self.search_worker.deleteLater()
+            self.search_worker = None
+
+    # ---------------------------
+    # Клоны
+    # ---------------------------
+
+    def start_duplicate_search(
+        self,
+    ):
+        if (
+            self.duplicate_worker
+            and self.duplicate_worker.isRunning()
+        ):
+            return
+
+        self.btn_duplicates.setEnabled(
             False
         )
 
@@ -827,9 +1150,11 @@ class MainWindow(QMainWindow):
             "Поиск клонов..."
         )
 
-        self.duplicate_worker = DuplicateWorker()
+        self.duplicate_worker = DuplicateWorker(
+            self
+        )
 
-        self.duplicate_worker.finished.connect(
+        self.duplicate_worker.finished_results.connect(
             self.duplicates_finished
         )
 
@@ -841,115 +1166,89 @@ class MainWindow(QMainWindow):
 
     def duplicates_finished(
         self,
-        duplicates
+        duplicates,
     ):
-
-        self.results.setRowCount(0)
+        self.results.setRowCount(
+            0
+        )
 
         row = 0
-
         total_files = 0
 
         for group in duplicates:
+            group_files = group[
+                "files"
+            ]
 
-            files = group["files"]
-
-            total_files += len(files)
+            total_files += len(
+                group_files
+            )
 
             for number, file in enumerate(
-                files,
-                start=1
+                group_files,
+                start=1,
             ):
-
                 self.results.insertRow(
                     row
                 )
 
-                if number == 1:
-
-                    name = (
-                        f"КЛОН {file['filename']}"
-                    )
-
-                else:
-
-                    name = (
-                        f"  ↳ {file['filename']}"
-                    )
-
-                self.results.setItem(
-                    row,
-                    0,
-                    QTableWidgetItem(
-                        name
-                    )
+                name = (
+                    f"КЛОН "
+                    f"{file['filename']}"
+                    if number == 1
+                    else
+                    f"  → "
+                    f"{file['filename']}"
                 )
 
-                self.results.setItem(
-                    row,
-                    1,
-                    QTableWidgetItem(
-                        "Клон"
-                    )
-                )
+                values = [
+                    name,
+                    "Клон",
+                    "100%",
+                    "Идентичное содержимое",
+                    file["filepath"],
+                ]
 
-                self.results.setItem(
-                    row,
-                    2,
-                    QTableWidgetItem(
-                        "100%"
+                for column, value in enumerate(
+                    values
+                ):
+                    self.results.setItem(
+                        row,
+                        column,
+                        QTableWidgetItem(
+                            value
+                        ),
                     )
-                )
-
-                self.results.setItem(
-                    row,
-                    3,
-                    QTableWidgetItem(
-                        "Идентичное содержимое"
-                    )
-                )
-
-                self.results.setItem(
-                    row,
-                    4,
-                    QTableWidgetItem(
-                        file["filepath"]
-                    )
-                )
 
                 row += 1
 
-        self.btn_duplicates.setEnabled(True)
-        self.btn_search.setEnabled(True)
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
+        self.btn_duplicates.setEnabled(
+            True
+        )
 
         if duplicates:
-
             self.status.setText(
-                f"Найдено групп клонов: "
+                f"Групп клонов: "
                 f"{len(duplicates)}. "
                 f"Файлов: {total_files}."
             )
 
         else:
-
             self.status.setText(
                 "Клонов не найдено."
             )
 
-        self.duplicate_worker.deleteLater()
-        self.duplicate_worker = None
+        if self.duplicate_worker:
+            self.duplicate_worker.deleteLater()
+            self.duplicate_worker = None
 
     def duplicates_error(
         self,
-        message
+        message,
     ):
-
-        self.btn_duplicates.setEnabled(True)
-        self.btn_search.setEnabled(True)
-        self.btn_index.setEnabled(True)
-        self.btn_folder.setEnabled(True)
+        self.btn_duplicates.setEnabled(
+            True
+        )
 
         self.status.setText(
             f"Ошибка поиска клонов: "
@@ -957,38 +1256,36 @@ class MainWindow(QMainWindow):
         )
 
         if self.duplicate_worker:
-
             self.duplicate_worker.deleteLater()
             self.duplicate_worker = None
-
-    # -------------------------------------------------
-    # Открытие файла
-    # -------------------------------------------------
 
     def open_file(
         self,
         row,
-        column
+        column,
     ):
-
-        filepath_item = self.results.item(
-            row,
-            4
+        filepath_item = (
+            self.results.item(
+                row,
+                4,
+            )
         )
 
         if filepath_item is None:
             return
 
-        filepath = filepath_item.text()
+        filepath = (
+            filepath_item.text()
+        )
 
-        if os.path.exists(filepath):
-
+        if os.path.exists(
+            filepath
+        ):
             os.startfile(
                 filepath
             )
 
         else:
-
             self.status.setText(
                 "Файл не найден"
             )

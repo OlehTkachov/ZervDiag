@@ -1,1 +1,5 @@
 PySide6
+pypdf
+python-docx
+openpyxl
+PyMuPDF

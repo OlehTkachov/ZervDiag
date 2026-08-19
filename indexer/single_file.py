@@ -1,27 +1,61 @@
-﻿from database.db import get_connection
-from readers.document_reader import read_document
-from onedrive.hydrate import hydrate_file
+from database.db import get_connection
+from readers.document_reader import (
+    OCRRequired,
+    read_document,
+)
+from onedrive.hydrate import (
+    hydrate_file,
+    dehydrate_file,
+)
 
 
-def load_and_index_file(file_id, filepath, is_cloud=False):
-    """
-    Загружает документ, при необходимости hydrate cloud-файл,
-    читает его и сохраняет текст в БД.
+MIN_CONTENT_CHARS = 10
 
-    Возвращает True при успешном чтении.
-    """
 
-    filepath = str(filepath)
+def _set_status(
+    file_id,
+    status,
+    error=None,
+):
+    conn = get_connection()
 
-    # Cloud-файл сначала принудительно делаем локальным.
-    if is_cloud:
-        if not hydrate_file(filepath):
-            return False
+    try:
+        conn.execute(
+            """
+            UPDATE files
+            SET
+                extraction_status = ?,
+                extraction_error = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                (
+                    str(error)[:2000]
+                    if error
+                    else None
+                ),
+                file_id,
+            ),
+        )
 
-    content = read_document(filepath)
+        conn.commit()
 
-    if not content:
-        return False
+    finally:
+        conn.close()
+
+
+def _queue_ocr(
+    file_id,
+    required,
+):
+    preview = (
+        required.preview
+        if len(
+            required.preview.strip()
+        ) >= MIN_CONTENT_CHARS
+        else None
+    )
 
     conn = get_connection()
 
@@ -31,10 +65,18 @@ def load_and_index_file(file_id, filepath, is_cloud=False):
             UPDATE files
             SET
                 content = ?,
-                is_cloud = 0
+                extraction_status = 'ocr_pending',
+                extraction_error = NULL,
+                ocr_page = 0,
+                ocr_total_pages = ?,
+                ocr_updated = NULL
             WHERE id = ?
             """,
-            (content, file_id)
+            (
+                preview,
+                required.total_pages,
+                file_id,
+            ),
         )
 
         conn.commit()
@@ -42,17 +84,262 @@ def load_and_index_file(file_id, filepath, is_cloud=False):
     finally:
         conn.close()
 
-    return True
+
+def load_and_index_file(
+    file_id,
+    filepath,
+    is_cloud=False,
+    stop_callback=None,
+):
+    """
+    Быстрая обработка одного файла.
+
+    Для сканированного PDF:
+        только ставит ocr_pending.
+        OCR здесь НЕ выполняется.
+    """
+
+    filepath = str(
+        filepath
+    )
+
+    hydrated = False
+
+    try:
+        _set_status(
+            file_id,
+            "processing",
+        )
+
+        if is_cloud:
+            print(
+                f"Hydrating: {filepath}",
+                flush=True,
+            )
+
+            try:
+                hydrate_file(
+                    filepath
+                )
+                hydrated = True
+
+            except Exception as error:
+                _set_status(
+                    file_id,
+                    "error",
+                    f"Hydrate error: {error}",
+                )
+
+                print(
+                    f"HYDRATE_ERROR: "
+                    f"{filepath}: {error}",
+                    flush=True,
+                )
+
+                return False
+
+        if (
+            stop_callback
+            and stop_callback()
+        ):
+            _set_status(
+                file_id,
+                "pending",
+            )
+
+            print(
+                f"STOPPED_BEFORE_EXTRACTION: "
+                f"{filepath}",
+                flush=True,
+            )
+
+            return False
+
+        print(
+            f"Extracting: {filepath}",
+            flush=True,
+        )
+
+        try:
+            content = read_document(
+                filepath,
+                stop_callback=stop_callback,
+            )
+
+        except OCRRequired as required:
+            _queue_ocr(
+                file_id,
+                required,
+            )
+
+            print(
+                f"OCR_QUEUED: "
+                f"{filepath} "
+                f"({required.total_pages} pages)",
+                flush=True,
+            )
+
+            return True
+
+        except InterruptedError:
+            _set_status(
+                file_id,
+                "pending",
+            )
+
+            print(
+                f"STOPPED_DURING_EXTRACTION: "
+                f"{filepath}",
+                flush=True,
+            )
+
+            return False
+
+        except Exception as error:
+            _set_status(
+                file_id,
+                "error",
+                f"Extraction error: {error}",
+            )
+
+            print(
+                f"EXTRACTION_ERROR: "
+                f"{filepath}: {error}",
+                flush=True,
+            )
+
+            return False
+
+        content = (
+            content or ""
+        )
+
+        if (
+            len(
+                content.strip()
+            )
+            < MIN_CONTENT_CHARS
+        ):
+            _set_status(
+                file_id,
+                "error",
+                (
+                    "Извлечено слишком мало текста: "
+                    f"{len(content.strip())} символов"
+                ),
+            )
+
+            print(
+                f"NO_USABLE_TEXT: "
+                f"{filepath} "
+                f"({len(content.strip())} chars)",
+                flush=True,
+            )
+
+            return False
+
+        conn = get_connection()
+
+        try:
+            conn.execute(
+                """
+                UPDATE files
+                SET
+                    content = ?,
+                    extraction_status = 'ok',
+                    extraction_error = NULL,
+                    ocr_page = 0,
+                    ocr_total_pages = 0,
+                    ocr_updated = NULL
+                WHERE id = ?
+                """,
+                (
+                    content,
+                    file_id,
+                ),
+            )
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+        print(
+            f"Indexed: "
+            f"{filepath} "
+            f"({len(content)} chars)",
+            flush=True,
+        )
+
+        return True
+
+    finally:
+        if hydrated:
+            print(
+                f"Releasing to OneDrive: "
+                f"{filepath}",
+                flush=True,
+            )
+
+            try:
+                if dehydrate_file(
+                    filepath
+                ):
+                    print(
+                        f"Released: "
+                        f"{filepath}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "WARNING: indexed but "
+                        "release failed: "
+                        f"{filepath}",
+                        flush=True,
+                    )
+
+            except Exception as error:
+                print(
+                    f"WARNING: release error: "
+                    f"{filepath}: {error}",
+                    flush=True,
+                )
 
 
-def index_single_file(file_id, filepath):
-    """
-    Совместимость со старым кодом.
-    Используется для cloud-файлов.
-    """
+def index_single_file(
+    file_id,
+    filepath,
+):
+    conn = get_connection()
+
+    try:
+        row = conn.execute(
+            """
+            SELECT is_cloud
+            FROM files
+            WHERE id = ?
+            """,
+            (file_id,),
+        ).fetchone()
+
+    finally:
+        conn.close()
+
+    if not row:
+        return False
+
+    is_cloud = bool(
+        row[0]
+    )
+
+    print(
+        f"BEFORE CLOUD: "
+        f"{int(is_cloud)}",
+        flush=True,
+    )
 
     return load_and_index_file(
-        file_id,
-        filepath,
-        is_cloud=True
+        file_id=file_id,
+        filepath=filepath,
+        is_cloud=is_cloud,
     )

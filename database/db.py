@@ -10,69 +10,213 @@ DB_PATH = DATA_DIR / "zervdiag.db"
 def get_connection():
     DATA_DIR.mkdir(exist_ok=True)
 
-    return sqlite3.connect(
-        DB_PATH
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=30,
     )
+
+    conn.execute(
+        "PRAGMA journal_mode=WAL"
+    )
+
+    conn.execute(
+        "PRAGMA foreign_keys=ON"
+    )
+
+    return conn
 
 
 def create_database():
-
     conn = get_connection()
 
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS files (
-
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            filename TEXT NOT NULL,
-
-            filepath TEXT NOT NULL UNIQUE,
-
-            extension TEXT,
-
-            size INTEGER,
-
-            modified REAL,
-
-            content TEXT,
-
-            file_hash TEXT,
-
-            is_cloud INTEGER DEFAULT 0
-
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                filepath TEXT NOT NULL UNIQUE,
+                extension TEXT,
+                size INTEGER,
+                modified REAL,
+                content TEXT,
+                file_hash TEXT,
+                is_cloud INTEGER DEFAULT 0,
+                extraction_status TEXT DEFAULT 'pending',
+                extraction_error TEXT,
+                ocr_page INTEGER DEFAULT 0,
+                ocr_total_pages INTEGER DEFAULT 0,
+                ocr_updated REAL
+            )
+            """
         )
-    """)
 
-    # Совместимость со старой базой
-    cursor.execute(
-        "PRAGMA table_info(files)"
-    )
+        columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(files)"
+            ).fetchall()
+        }
 
-    columns = {
-        row[1]
-        for row in cursor.fetchall()
+        migrations = {
+            "content":
+                "ALTER TABLE files ADD COLUMN content TEXT",
+
+            "file_hash":
+                "ALTER TABLE files ADD COLUMN file_hash TEXT",
+
+            "is_cloud":
+                "ALTER TABLE files ADD COLUMN is_cloud INTEGER DEFAULT 0",
+
+            "extraction_status":
+                (
+                    "ALTER TABLE files ADD COLUMN "
+                    "extraction_status TEXT DEFAULT 'pending'"
+                ),
+
+            "extraction_error":
+                (
+                    "ALTER TABLE files ADD COLUMN "
+                    "extraction_error TEXT"
+                ),
+
+            "ocr_page":
+                (
+                    "ALTER TABLE files ADD COLUMN "
+                    "ocr_page INTEGER DEFAULT 0"
+                ),
+
+            "ocr_total_pages":
+                (
+                    "ALTER TABLE files ADD COLUMN "
+                    "ocr_total_pages INTEGER DEFAULT 0"
+                ),
+
+            "ocr_updated":
+                (
+                    "ALTER TABLE files ADD COLUMN "
+                    "ocr_updated REAL"
+                ),
+        }
+
+        for column, sql in migrations.items():
+            if column not in columns:
+                conn.execute(
+                    sql
+                )
+
+        conn.execute(
+            """
+            UPDATE files
+            SET ocr_page = 0
+            WHERE ocr_page IS NULL
+            """
+        )
+
+        conn.execute(
+            """
+            UPDATE files
+            SET ocr_total_pages = 0
+            WHERE ocr_total_pages IS NULL
+            """
+        )
+
+        # Если программа была закрыта во время OCR,
+        # при следующем запуске файл снова доступен очереди.
+        conn.execute(
+            """
+            UPDATE files
+            SET extraction_status = 'ocr_pending'
+            WHERE extraction_status = 'ocr_processing'
+            """
+        )
+
+        # Старый "успешный" мусор вроде 'Ш №'
+        # не считаем полноценным индексом.
+        conn.execute(
+            """
+            UPDATE files
+            SET extraction_status = 'pending'
+            WHERE extraction_status = 'ok'
+              AND (
+                    content IS NULL
+                    OR length(trim(content)) < 10
+                  )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_files_filename
+            ON files(filename)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_files_status
+            ON files(extraction_status)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+            idx_files_cloud
+            ON files(is_cloud)
+            """
+        )
+
+        conn.commit()
+
+    finally:
+        conn.close()
+
+
+def get_status_counts():
+    conn = get_connection()
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                extraction_status,
+                COUNT(*)
+            FROM files
+            GROUP BY extraction_status
+            """
+        ).fetchall()
+
+    finally:
+        conn.close()
+
+    return {
+        (
+            status
+            if status
+            else "pending"
+        ): count
+        for status, count in rows
     }
 
-    if "content" not in columns:
 
-        cursor.execute(
-            "ALTER TABLE files ADD COLUMN content TEXT"
-        )
+def get_ocr_pending_count():
+    conn = get_connection()
 
-    if "file_hash" not in columns:
+    try:
+        return conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM files
+            WHERE extension = '.pdf'
+              AND extraction_status IN (
+                    'ocr_pending',
+                    'ocr_processing'
+                  )
+            """
+        ).fetchone()[0]
 
-        cursor.execute(
-            "ALTER TABLE files ADD COLUMN file_hash TEXT"
-        )
-
-    if "is_cloud" not in columns:
-
-        cursor.execute(
-            "ALTER TABLE files ADD COLUMN is_cloud INTEGER DEFAULT 0"
-        )
-
-    conn.commit()
-
-    conn.close()
+    finally:
+        conn.close()
