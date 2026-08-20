@@ -1,5 +1,13 @@
 import re
 import sys
+from pathlib import Path
+
+# Скрипт запускается из папки tools, поэтому корень проекта
+# явно добавляем в sys.path. Тогда импорты database/search
+# работают независимо от текущей рабочей папки.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from database.db import get_connection
 from search.search import (
