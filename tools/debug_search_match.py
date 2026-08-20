@@ -39,17 +39,19 @@ def _contexts(text, kind, value, radius=140, limit=3):
 
 def main():
     if len(sys.argv) < 3:
-        print('Usage: python tools/debug_search_match.py "Terex AC 35L" "RC45"')
+        print('Usage: python tools/debug_search_match.py "ОНК 160С E10" "ОНК"')
         raise SystemExit(2)
 
     query = sys.argv[1]
-    filename_part = sys.argv[2]
+    filter_part = sys.argv[2]
     requirements = query_requirements(query)
 
     print("QUERY:", query)
     print("REQUIREMENTS:", requirements)
-    print("FILENAME FILTER:", filename_part)
+    print("FILE/PATH FILTER:", filter_part)
     print()
+
+    like = f"%{filter_part}%"
 
     conn = get_connection()
     try:
@@ -62,10 +64,11 @@ def main():
                 COALESCE(content, '')
             FROM files
             WHERE lower(filename) LIKE lower(?)
+               OR lower(filepath) LIKE lower(?)
             ORDER BY filename, id
             LIMIT 30
             """,
-            (f"%{filename_part}%",),
+            (like, like),
         ).fetchall()
     finally:
         conn.close()
