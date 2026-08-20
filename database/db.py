@@ -51,6 +51,15 @@ def create_database():
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+
         columns = {
             row[1]
             for row in conn.execute(
@@ -131,6 +140,60 @@ def create_database():
             """
         )
 
+        # V13: один раз переносим старые изображения, которые
+        # раньше OCR-ились прямо в быстрой индексации, в общую
+        # OCR-очередь. Повторно этот migration не выполняется,
+        # поэтому новый OCR error не будет бесконечно повторяться.
+        image_migration = conn.execute(
+            """
+            SELECT value
+            FROM app_meta
+            WHERE key = 'image_ocr_queue_v13'
+            """
+        ).fetchone()
+
+        if not image_migration:
+            conn.execute(
+                """
+                UPDATE files
+                SET
+                    extraction_status = 'ocr_pending',
+                    extraction_error = NULL,
+                    ocr_page = 0,
+                    ocr_total_pages = 0,
+                    ocr_updated = NULL
+                WHERE extension IN (
+                        '.jpg',
+                        '.jpeg',
+                        '.png',
+                        '.tif',
+                        '.tiff'
+                      )
+                  AND extraction_status IN (
+                        'pending',
+                        'processing',
+                        'error'
+                      )
+                  AND (
+                        content IS NULL
+                        OR length(trim(content)) < 10
+                      )
+                """
+            )
+
+            conn.execute(
+                """
+                INSERT INTO app_meta (
+                    key,
+                    value
+                )
+                VALUES (
+                    'image_ocr_queue_v13',
+                    '1'
+                )
+                """
+            )
+
         # Старый "успешный" мусор вроде 'Ш №'
         # не считаем полноценным индексом.
         conn.execute(
@@ -210,7 +273,14 @@ def get_ocr_pending_count():
             """
             SELECT COUNT(*)
             FROM files
-            WHERE extension = '.pdf'
+            WHERE extension IN (
+                    '.pdf',
+                    '.jpg',
+                    '.jpeg',
+                    '.png',
+                    '.tif',
+                    '.tiff'
+                  )
               AND extraction_status IN (
                     'ocr_pending',
                     'ocr_processing'
