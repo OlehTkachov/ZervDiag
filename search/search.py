@@ -47,6 +47,7 @@ TECH_CONFUSABLES = {
 # Если модель есть только внутри текста, считаем её основной моделью
 # документа, когда она встречается на первых страницах или многократно.
 MODEL_EARLY_CHAR_LIMIT = 8000
+SINGLE_MODEL_EARLY_CHAR_LIMIT = 2000
 MODEL_REPEAT_MIN = 3
 
 
@@ -313,34 +314,51 @@ def _model_context_supported(
     requirements,
 ):
     """
-    Для запроса вида "Terex AC35L" слово — широкий контекст бренда,
-    а технический код — модель.
+    Отсекает побочные ссылки на модель внутри чужих документов.
 
-    Если модель есть в имени/пути, документ однозначно относится к ней.
-    Если модель встречается только в тексте, принимаем документ лишь
-    когда модель есть в начале текста или повторяется несколько раз.
-    Одиночные поздние ссылки в каталогах других моделей отсекаются.
+    Поддерживаются два случая:
+      - одиночный запрос модели: "КС 55727";
+      - бренд + модель: "Terex AC35L".
+
+    Имя/путь считаются сильным подтверждением принадлежности документа.
+    Если модель есть только в тексте, она должна встретиться достаточно
+    рано или несколько раз. Для одиночной модели раннее окно строже,
+    потому что нет дополнительного контекста бренда.
+
+    Диагностические запросы (например "ОНК160С E10") сюда не попадают:
+    код ошибки обрабатывается отдельно через _diagnostic_context().
     """
-    if len(requirements) != 2:
+    early_limit = MODEL_EARLY_CHAR_LIMIT
+
+    if len(requirements) == 1:
+        kind, value = requirements[0]
+
+        if kind != "tech" or FAULT_CODE_RE.fullmatch(value):
+            return True
+
+        early_limit = SINGLE_MODEL_EARLY_CHAR_LIMIT
+
+    elif len(requirements) == 2:
+        tech_requirements = [
+            item
+            for item in requirements
+            if item[0] == "tech"
+            and not FAULT_CODE_RE.fullmatch(item[1])
+        ]
+
+        word_requirements = [
+            item
+            for item in requirements
+            if item[0] == "word"
+        ]
+
+        if len(tech_requirements) != 1 or len(word_requirements) != 1:
+            return True
+
+        kind, value = tech_requirements[0]
+
+    else:
         return True
-
-    tech_requirements = [
-        item
-        for item in requirements
-        if item[0] == "tech"
-        and not FAULT_CODE_RE.fullmatch(item[1])
-    ]
-
-    word_requirements = [
-        item
-        for item in requirements
-        if item[0] == "word"
-    ]
-
-    if len(tech_requirements) != 1 or len(word_requirements) != 1:
-        return True
-
-    kind, value = tech_requirements[0]
 
     if (
         _requirement_matches_field(filename, kind, value)
@@ -358,7 +376,7 @@ def _model_context_supported(
         return False
 
     return (
-        first_position <= MODEL_EARLY_CHAR_LIMIT
+        first_position <= early_limit
         or count >= MODEL_REPEAT_MIN
     )
 
