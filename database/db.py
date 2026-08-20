@@ -142,8 +142,9 @@ def create_database():
 
         # V13: один раз переносим старые изображения, которые
         # раньше OCR-ились прямо в быстрой индексации, в общую
-        # OCR-очередь. Повторно этот migration не выполняется,
-        # поэтому новый OCR error не будет бесконечно повторяться.
+        # OCR-очередь. Включаем также старый status=ok с мусорным
+        # коротким текстом, иначе следующая migration сделала бы
+        # его pending уже после одноразового переноса.
         image_migration = conn.execute(
             """
             SELECT value
@@ -172,7 +173,8 @@ def create_database():
                   AND extraction_status IN (
                         'pending',
                         'processing',
-                        'error'
+                        'error',
+                        'ok'
                       )
                   AND (
                         content IS NULL
