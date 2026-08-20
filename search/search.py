@@ -23,6 +23,7 @@ TECH_PREFIX_STOPWORDS = {
 }
 
 WORD_CHAR_CLASS = r"0-9A-Za-zА-Яа-яЁё"
+TECH_SEPARATOR = r"[\s._/+\\-]*"
 
 
 def _raw_tokens(query):
@@ -123,8 +124,7 @@ def _word_pattern(value):
     """
     Обычное слово ищем как самостоятельный токен.
 
-    Например PAT не должен совпадать с comPATible.
-    Дефис, пробел, подчёркивание и слэш считаются разделителями.
+    PAT не должен совпадать с compatible.
     """
     return (
         rf"(?<![{WORD_CHAR_CLASS}])"
@@ -133,18 +133,55 @@ def _word_pattern(value):
     )
 
 
+def _tech_groups(value):
+    """
+    Делит компактный код на смысловые буквенно-цифровые группы.
+
+    ac35l  -> [ac, 35, l]
+    ds350  -> [ds, 350]
+    онк160 -> [онк, 160]
+    e15    -> [e, 15]
+
+    Это принципиально отличается от разделения по каждому символу:
+    A C 3 5 L больше не считается вариантом AC35L.
+    """
+    return re.findall(
+        r"[A-Za-zА-Яа-яЁё]+|\d+",
+        value,
+    )
+
+
 def _tech_pattern(value):
     """
-    Технический код допускает реальные разделители между символами:
-    AC35L / AC 35L / AC-35L / AC/35L.
+    Допускает разделители только МЕЖДУ смысловыми группами кода.
 
-    Важно: мы НЕ удаляем разделители из целого документа. Иначе
-    символы из разных слов могли случайно склеиваться в код.
+    AC35L / AC 35L / AC-35-L / AC/35L -> совпадают.
+    A C 3 5 L                          -> не совпадает.
+
+    Для моделей, оканчивающихся цифрами, допускаем буквенный суффикс
+    в документе: DS350 ищет DS350GW, ОНК160 ищет ОНК160С.
+    Короткие коды ошибок E15/F123 остаются строго точными.
     """
-    return r"[\s._/+\\-]*".join(
-        re.escape(char)
-        for char in value
+    groups = _tech_groups(value)
+
+    if not groups:
+        return r"(?!)"
+
+    body = TECH_SEPARATOR.join(
+        re.escape(group)
+        for group in groups
     )
+
+    left = rf"(?<![{WORD_CHAR_CLASS}])"
+
+    if FAULT_CODE_RE.fullmatch(value):
+        right = rf"(?![{WORD_CHAR_CLASS}])"
+    elif value[-1].isdigit():
+        right = r"(?![0-9])"
+    else:
+        right = rf"(?![{WORD_CHAR_CLASS}])"
+
+    return left + body + right
 
 
 def _requirement_pattern(kind, value):
@@ -167,12 +204,6 @@ def _requirement_matches_field(field, kind, value):
 
 
 def _matches_fields(fields, requirements):
-    """
-    Каждое условие должно встретиться хотя бы в одном поле:
-    имя, полный путь или содержимое.
-
-    Разные условия могут находиться в разных полях.
-    """
     for kind, value in requirements:
         if not any(
             _requirement_matches_field(field, kind, value)
@@ -185,13 +216,9 @@ def _matches_fields(fields, requirements):
 
 def _diagnostic_context(requirements):
     """
-    Запрос вида "PAT DS350 E15" понимаем как:
+    PAT DS350 E15:
         PAT / DS350 — контекст оборудования;
-        E15        — код, который ищем в документе.
-
-    Консервативно распознаём только короткие коды с одной буквой
-    и цифрами (E10, E15, F123...), чтобы модели вроде AC35L не
-    превращались в диагностический хвост автоматически.
+        E15         — диагностический код.
     """
     if len(requirements) < 2:
         return []
@@ -213,13 +240,6 @@ def _matches_query(
     content,
     requirements,
 ):
-    """
-    Точный матч + защита от случайных совпадений в больших каталогах.
-
-    Если запрос заканчивается коротким кодом ошибки, хотя бы один
-    предыдущий контекстный элемент должен находиться в имени файла
-    или в пути. Сам код ошибки может быть только внутри текста.
-    """
     if not _matches_fields(
         (
             filename,
@@ -230,18 +250,13 @@ def _matches_query(
     ):
         return False
 
-    context = _diagnostic_context(
-        requirements
-    )
+    context = _diagnostic_context(requirements)
 
     if not context:
         return True
 
-    identity_fields = (
-        filename,
-        filepath,
-    )
-
+    # Для диагностического запроса хотя бы одна часть контекста
+    # оборудования должна быть в имени файла или пути.
     return any(
         _requirement_matches_field(
             field,
@@ -249,7 +264,26 @@ def _matches_query(
             value,
         )
         for kind, value in context
-        for field in identity_fields
+        for field in (filename, filepath)
+    )
+
+
+def _snippet_requirements(requirements):
+    """Код ошибки показываем первым, затем остальные техкоды."""
+    if requirements:
+        kind, value = requirements[-1]
+        if kind == "tech" and FAULT_CODE_RE.fullmatch(value):
+            tail = requirements[-1]
+            rest = requirements[:-1]
+            rest = sorted(
+                rest,
+                key=lambda item: 0 if item[0] == "tech" else 1,
+            )
+            return [tail] + rest
+
+    return sorted(
+        requirements,
+        key=lambda item: 0 if item[0] == "tech" else 1,
     )
 
 
@@ -257,14 +291,8 @@ def make_snippet(text, query, radius=180):
     if not text:
         return ""
 
-    requirements = query_requirements(query)
-
-    # Для диагностических/технических запросов сначала показываем
-    # совпадение самого кода (AC35L, КС55724, ОНК160...), а уже
-    # потом общих слов вроде Terex/PAT.
-    requirements = sorted(
-        requirements,
-        key=lambda item: 0 if item[0] == "tech" else 1,
+    requirements = _snippet_requirements(
+        query_requirements(query)
     )
 
     for kind, value in requirements:
@@ -298,10 +326,7 @@ def make_snippet(text, query, radius=180):
 
 
 def _rough_sql_filter(requirements):
-    """
-    Грубый SQL-фильтр только уменьшает число кандидатов.
-    Окончательная проверка всегда выполняется Python-регулярками.
-    """
+    """Грубый SQL-фильтр; окончательная проверка идёт регулярками."""
     conditions = []
     parameters = []
 
@@ -333,12 +358,6 @@ def _rough_sql_filter(requirements):
 
 
 def _relevance_score(filename, filepath, content, requirements):
-    """
-    Имя и путь сильнее содержимого.
-
-    Это не меняет условие совпадения, а только поднимает наиболее
-    очевидные каталоги/руководства выше в выдаче.
-    """
     score = 0
 
     for kind, value in requirements:
@@ -356,8 +375,7 @@ def search_files(query, limit=200):
     """
     Поиск только по SQLite.
 
-    Полный путь остаётся частью поиска, потому что структура
-    папок несёт смысловую информацию о документе.
+    Имя, полный путь и извлечённый текст участвуют в поиске.
     """
     query = query.strip()
 
