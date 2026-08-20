@@ -25,6 +25,11 @@ TECH_PREFIX_STOPWORDS = {
 WORD_CHAR_CLASS = r"0-9A-Za-zА-Яа-яЁё"
 TECH_SEPARATOR = r"[\s._/+\\-]*"
 
+# Если модель есть только внутри текста, считаем её основной моделью
+# документа, когда она встречается на первых страницах или многократно.
+MODEL_EARLY_CHAR_LIMIT = 8000
+MODEL_REPEAT_MIN = 3
+
 
 def _raw_tokens(query):
     return [
@@ -141,9 +146,6 @@ def _tech_groups(value):
     ds350  -> [ds, 350]
     онк160 -> [онк, 160]
     e15    -> [e, 15]
-
-    Это принципиально отличается от разделения по каждому символу:
-    A C 3 5 L больше не считается вариантом AC35L.
     """
     return re.findall(
         r"[A-Za-zА-Яа-яЁё]+|\d+",
@@ -153,7 +155,7 @@ def _tech_groups(value):
 
 def _tech_pattern(value):
     """
-    Допускает разделители только МЕЖДУ смысловыми группами кода.
+    Допускает разделители только между смысловыми группами кода.
 
     AC35L / AC 35L / AC-35-L / AC/35L -> совпадают.
     A C 3 5 L                          -> не совпадает.
@@ -234,6 +236,91 @@ def _diagnostic_context(requirements):
     return []
 
 
+def _content_model_evidence(content, kind, value):
+    """
+    Возвращает (первое_совпадение, количество_совпадений_до_лимита).
+
+    Нужен для различия:
+      - руководство по AC35L, где модель есть на титуле/много раз;
+      - каталог RC45, где AC35L один раз упомянут как чужая деталь.
+    """
+    pattern = _requirement_pattern(kind, value)
+    first_position = None
+    count = 0
+
+    for match in re.finditer(
+        pattern,
+        content or "",
+        flags=re.IGNORECASE,
+    ):
+        if first_position is None:
+            first_position = match.start()
+
+        count += 1
+
+        if count >= MODEL_REPEAT_MIN:
+            break
+
+    return first_position, count
+
+
+def _model_context_supported(
+    filename,
+    filepath,
+    content,
+    requirements,
+):
+    """
+    Для запроса вида "Terex AC35L" слово — широкий контекст бренда,
+    а технический код — модель.
+
+    Если модель есть в имени/пути, документ однозначно относится к ней.
+    Если модель встречается только в тексте, принимаем документ лишь
+    когда модель есть в начале текста или повторяется несколько раз.
+    Одиночные поздние ссылки в каталогах других моделей отсекаются.
+    """
+    if len(requirements) != 2:
+        return True
+
+    tech_requirements = [
+        item
+        for item in requirements
+        if item[0] == "tech"
+        and not FAULT_CODE_RE.fullmatch(item[1])
+    ]
+
+    word_requirements = [
+        item
+        for item in requirements
+        if item[0] == "word"
+    ]
+
+    if len(tech_requirements) != 1 or len(word_requirements) != 1:
+        return True
+
+    kind, value = tech_requirements[0]
+
+    if (
+        _requirement_matches_field(filename, kind, value)
+        or _requirement_matches_field(filepath, kind, value)
+    ):
+        return True
+
+    first_position, count = _content_model_evidence(
+        content,
+        kind,
+        value,
+    )
+
+    if first_position is None:
+        return False
+
+    return (
+        first_position <= MODEL_EARLY_CHAR_LIMIT
+        or count >= MODEL_REPEAT_MIN
+    )
+
+
 def _matches_query(
     filename,
     filepath,
@@ -252,19 +339,25 @@ def _matches_query(
 
     context = _diagnostic_context(requirements)
 
-    if not context:
-        return True
+    if context:
+        # Для диагностического запроса хотя бы одна часть контекста
+        # оборудования должна быть в имени файла или пути.
+        if not any(
+            _requirement_matches_field(
+                field,
+                kind,
+                value,
+            )
+            for kind, value in context
+            for field in (filename, filepath)
+        ):
+            return False
 
-    # Для диагностического запроса хотя бы одна часть контекста
-    # оборудования должна быть в имени файла или пути.
-    return any(
-        _requirement_matches_field(
-            field,
-            kind,
-            value,
-        )
-        for kind, value in context
-        for field in (filename, filepath)
+    return _model_context_supported(
+        filename,
+        filepath,
+        content,
+        requirements,
     )
 
 
