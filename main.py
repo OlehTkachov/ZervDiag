@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
 from ui.database_status import install_database_status
+from ui.table_resizing import install_manual_table_resizing
 
 
 def main():
@@ -11,6 +12,7 @@ def main():
 
     window = MainWindow()
     install_database_status(window)
+    install_manual_table_resizing(window)
     window.show()
 
     sys.exit(app.exec())
