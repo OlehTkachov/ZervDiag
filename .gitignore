@@ -1,14 +1,20 @@
-.venv/
+﻿.venv/
 __pycache__/
+**/__pycache__/
 *.pyc
 
 data/
 *.db
+*.db-wal
+*.db-shm
 
 .vscode/
-.idea/data/*.db
-data/*.db-wal
-data/*.db-shm
+.idea/
 backup_before_*/
-**/__pycache__/
 search/search.py.before_deep
+
+find_cloud.py
+find_cloud_docs.py
+indexer/reindex_missing.py
+test_image.py
+test_image_ocr.py
