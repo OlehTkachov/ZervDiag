@@ -25,6 +25,25 @@ TECH_PREFIX_STOPWORDS = {
 WORD_CHAR_CLASS = r"0-9A-Za-zА-Яа-яЁё"
 TECH_SEPARATOR = r"[\s._/+\\-]*"
 
+# В технической документации часто перемешаны визуально одинаковые
+# латинские и кириллические буквы. Например:
+#   ОНК-160С / ОНК-160C / OHK-160C
+#   E10 / Е10
+# Для tech-кодов считаем такие буквы эквивалентными.
+TECH_CONFUSABLES = {
+    "a": "aа", "а": "aа",
+    "b": "bв", "в": "bв",
+    "c": "cс", "с": "cс",
+    "e": "eе", "е": "eе",
+    "h": "hн", "н": "hн",
+    "k": "kк", "к": "kк",
+    "m": "mм", "м": "mм",
+    "o": "oо", "о": "oо",
+    "p": "pр", "р": "pр",
+    "t": "tт", "т": "tт",
+    "x": "xх", "х": "xх",
+}
+
 # Если модель есть только внутри текста, считаем её основной моделью
 # документа, когда она встречается на первых страницах или многократно.
 MODEL_EARLY_CHAR_LIMIT = 8000
@@ -153,12 +172,35 @@ def _tech_groups(value):
     )
 
 
+def _tech_char_pattern(char):
+    """Regex одного символа tech-кода с учётом латиница/кириллица."""
+    variants = TECH_CONFUSABLES.get(char.lower())
+
+    if not variants:
+        return re.escape(char)
+
+    return "[" + "".join(
+        re.escape(item)
+        for item in variants
+    ) + "]"
+
+
+def _tech_group_pattern(group):
+    return "".join(
+        _tech_char_pattern(char)
+        for char in group
+    )
+
+
 def _tech_pattern(value):
     """
     Допускает разделители только между смысловыми группами кода.
 
     AC35L / AC 35L / AC-35-L / AC/35L -> совпадают.
     A C 3 5 L                          -> не совпадает.
+
+    Внутри tech-кодов визуальные латинские/кириллические буквы
+    эквивалентны: E10=Е10, ОНК160С=OHK160C.
 
     Для моделей, оканчивающихся цифрами, допускаем буквенный суффикс
     в документе: DS350 ищет DS350GW, ОНК160 ищет ОНК160С.
@@ -170,7 +212,7 @@ def _tech_pattern(value):
         return r"(?!)"
 
     body = TECH_SEPARATOR.join(
-        re.escape(group)
+        _tech_group_pattern(group)
         for group in groups
     )
 
@@ -418,6 +460,42 @@ def make_snippet(text, query, radius=180):
     return ""
 
 
+def _tech_prefix_variants(value):
+    """
+    Возвращает варианты буквенного префикса для грубого SQL-фильтра.
+
+    Точный матч всё равно делает Python regex, но SQL не должен потерять
+    документ из-за E/Е или C/С ещё до точной проверки.
+    """
+    prefix_match = re.match(r"[A-Za-zА-Яа-яЁё]+", value)
+
+    if not prefix_match:
+        return [value[:2]]
+
+    variants = [""]
+
+    for char in prefix_match.group(0):
+        choices = TECH_CONFUSABLES.get(char.lower(), char.lower())
+        variants = [
+            base + choice
+            for base in variants
+            for choice in choices
+        ]
+
+    # SQLite lower()/LIKE не гарантируют Unicode-регистр для кириллицы.
+    # Поэтому добавляем оба регистра и удаляем дубликаты.
+    result = []
+    seen = set()
+
+    for variant in variants:
+        for item in (variant.lower(), variant.upper()):
+            if item not in seen:
+                seen.add(item)
+                result.append(item)
+
+    return result
+
+
 def _rough_sql_filter(requirements):
     """Грубый SQL-фильтр; окончательная проверка идёт регулярками."""
     conditions = []
@@ -426,26 +504,36 @@ def _rough_sql_filter(requirements):
     for kind, value in requirements:
         if kind == "word":
             pattern = f"%{value}%"
-        else:
-            prefix_match = re.match(r"[a-zа-яё]+", value)
-            prefix = (
-                prefix_match.group(0)
-                if prefix_match
-                else value[:2]
+            conditions.append(
+                """
+                (
+                    lower(filename) LIKE ?
+                    OR lower(filepath) LIKE ?
+                    OR lower(content) LIKE ?
+                )
+                """
             )
+            parameters.extend([pattern, pattern, pattern])
+            continue
+
+        alternatives = []
+
+        for prefix in _tech_prefix_variants(value):
             pattern = f"%{prefix}%"
+            alternatives.append(
+                """
+                (
+                    filename LIKE ?
+                    OR filepath LIKE ?
+                    OR content LIKE ?
+                )
+                """
+            )
+            parameters.extend([pattern, pattern, pattern])
 
         conditions.append(
-            """
-            (
-                lower(filename) LIKE ?
-                OR lower(filepath) LIKE ?
-                OR lower(content) LIKE ?
-            )
-            """
+            "(" + " OR ".join(alternatives) + ")"
         )
-
-        parameters.extend([pattern, pattern, pattern])
 
     return " AND ".join(conditions), parameters
 
