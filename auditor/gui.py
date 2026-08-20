@@ -37,6 +37,7 @@ CATEGORY_NAMES = {
     "useful": "Полезный",
     "review": "Проверить",
     "suspicious": "Подозрительный",
+    "programmatic": "ПРОГРАММАТИКА · защищено",
 }
 
 
@@ -115,7 +116,17 @@ class AuditorWindow(QMainWindow):
         self.category_filter.addItem("Подозрительные", "suspicious")
         self.category_filter.addItem("Нужно проверить", "review")
         self.category_filter.addItem("Вероятно полезные", "useful")
+        self.category_filter.addItem(
+            "Программатика · защищено",
+            "programmatic",
+        )
         controls.addWidget(self.category_filter)
+
+        self.btn_programmatic = QPushButton("Программатика")
+        self.btn_programmatic.setToolTip(
+            "Показать защищённые файлы прошивок и программного обеспечения техники"
+        )
+        controls.addWidget(self.btn_programmatic)
 
         controls.addWidget(QLabel("Фильтр:"))
 
@@ -161,7 +172,7 @@ class AuditorWindow(QMainWindow):
         header = self.files_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.resizeSection(0, 75)
-        header.resizeSection(1, 120)
+        header.resizeSection(1, 190)
         header.resizeSection(2, 300)
         header.resizeSection(3, 80)
         header.resizeSection(4, 100)
@@ -176,6 +187,7 @@ class AuditorWindow(QMainWindow):
             self._apply_file_filter
         )
         self.text_filter.textChanged.connect(self._apply_file_filter)
+        self.btn_programmatic.clicked.connect(self._show_programmatic)
         self.btn_refresh.clicked.connect(self._start_load)
         self.btn_export.clicked.connect(self._export_csv)
         self.btn_open.clicked.connect(self._open_selected)
@@ -209,7 +221,7 @@ class AuditorWindow(QMainWindow):
         layout.addLayout(controls)
 
         self.group_table = QTableWidget()
-        self.group_table.setColumnCount(5)
+        self.group_table.setColumnCount(6)
         self.group_table.setHorizontalHeaderLabels(
             [
                 "Группа",
@@ -217,6 +229,7 @@ class AuditorWindow(QMainWindow):
                 "Подозрительных",
                 "Проверить",
                 "Полезных",
+                "Программатика",
             ]
         )
         self.group_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -225,7 +238,7 @@ class AuditorWindow(QMainWindow):
 
         header = self.group_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for column in range(1, 5):
+        for column in range(1, 6):
             header.setSectionResizeMode(
                 column,
                 QHeaderView.ResizeToContents,
@@ -283,6 +296,7 @@ class AuditorWindow(QMainWindow):
 
     def _set_busy(self, busy):
         enabled = not busy
+        self.btn_programmatic.setEnabled(enabled)
         self.btn_refresh.setEnabled(enabled)
         self.btn_export.setEnabled(enabled)
         self.btn_open.setEnabled(enabled)
@@ -295,6 +309,7 @@ class AuditorWindow(QMainWindow):
         counts = summarize(records)
         self.summary_label.setText(
             f"Всего: {counts['total']:,}   |   "
+            f"Программатика: {counts['programmatic']:,}   |   "
             f"Вероятно полезные: {counts['useful']:,}   |   "
             f"Проверить: {counts['review']:,}   |   "
             f"Подозрительные: {counts['suspicious']:,}"
@@ -312,8 +327,8 @@ class AuditorWindow(QMainWindow):
 
         self._set_busy(False)
         self.status.setText(
-            "Готово. Сначала смотрите «Подозрительные», "
-            "затем «Нужно проверить»."
+            "Готово. «Программатика» вынесена из оценки и защищена от карантина. "
+            "Сначала смотрите «Подозрительные», затем «Нужно проверить»."
         )
 
         if self.load_worker:
@@ -332,6 +347,11 @@ class AuditorWindow(QMainWindow):
         if self.load_worker:
             self.load_worker.deleteLater()
             self.load_worker = None
+
+    def _show_programmatic(self):
+        index = self.category_filter.findData("programmatic")
+        if index >= 0:
+            self.category_filter.setCurrentIndex(index)
 
     def _apply_file_filter(self):
         category = self.category_filter.currentData() or "all"
@@ -374,8 +394,14 @@ class AuditorWindow(QMainWindow):
         self.files_table.setRowCount(len(records))
 
         for row, record in enumerate(records):
+            score_text = (
+                "—"
+                if record.category == "programmatic"
+                else str(record.score)
+            )
+
             values = [
-                str(record.score),
+                score_text,
                 CATEGORY_NAMES.get(record.category, record.category),
                 record.filename,
                 record.extension,
@@ -391,7 +417,8 @@ class AuditorWindow(QMainWindow):
 
                 if column == 0:
                     item.setData(Qt.UserRole, record.file_id)
-                    item.setData(Qt.EditRole, record.score)
+                    if record.category != "programmatic":
+                        item.setData(Qt.EditRole, record.score)
 
                 self.files_table.setItem(row, column, item)
 
@@ -543,6 +570,7 @@ class AuditorWindow(QMainWindow):
                 stat.suspicious,
                 stat.review,
                 stat.useful,
+                stat.programmatic,
             ]
 
             for column, value in enumerate(values):
@@ -589,6 +617,21 @@ class AuditorWindow(QMainWindow):
             )
             return
 
+        protected_count = sum(
+            1
+            for record in records
+            if record.category == "programmatic"
+        )
+
+        if protected_count == len(records):
+            QMessageBox.warning(
+                self,
+                "Защищённые файлы",
+                "Выбрана программатика. Эти файлы защищены и "
+                "не могут быть перемещены в карантин.",
+            )
+            return
+
         library_root = self.settings.value("documentation_folder", "")
 
         if not library_root or not os.path.isdir(library_root):
@@ -613,10 +656,18 @@ class AuditorWindow(QMainWindow):
         if not quarantine_root:
             return
 
+        protected_text = (
+            f"\nЗащищённых файлов программатикы: {protected_count} — "
+            "они будут пропущены.\n"
+            if protected_count
+            else ""
+        )
+
         answer = QMessageBox.question(
             self,
             "Переместить в карантин?",
-            f"Выбрано файлов: {len(records)}.\n\n"
+            f"Выбрано файлов: {len(records)}.\n"
+            f"{protected_text}\n"
             "Файлы НЕ будут удалены — они будут перемещены "
             "в выбранную папку с сохранением структуры.\n\n"
             "Облачные файлы автоматически перемещаться не будут.\n\n"
