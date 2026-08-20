@@ -153,7 +153,18 @@ def make_snippet(text, query, radius=180):
     if not text:
         return ""
 
-    for kind, value in query_requirements(query):
+    requirements = query_requirements(query)
+
+    # Для диагностических/технических запросов сначала показываем
+    # совпадение самого кода (AC35L, КС55724, ОНК160...), а уже
+    # потом общих слов вроде Terex. Иначе ложные результаты трудно
+    # отличить от документов, где код действительно упомянут.
+    requirements = sorted(
+        requirements,
+        key=lambda item: 0 if item[0] == "tech" else 1,
+    )
+
+    for kind, value in requirements:
         if kind == "word":
             match = re.search(
                 re.escape(value),
