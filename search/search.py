@@ -21,6 +21,8 @@ TECH_PREFIX_STOPWORDS = {
     "of", "for", "to", "from", "and", "or", "with", "year",
 }
 
+WORD_CHAR_CLASS = r"0-9A-Za-zА-Яа-яЁё"
+
 
 def _raw_tokens(query):
     return [
@@ -116,13 +118,51 @@ def query_requirements(query):
     return requirements
 
 
+def _word_pattern(value):
+    """
+    Обычное слово ищем как самостоятельный токен.
+
+    Например PAT не должен совпадать с comPATible.
+    Дефис, пробел, подчёркивание и слэш считаются разделителями.
+    """
+    return (
+        rf"(?<![{WORD_CHAR_CLASS}])"
+        + re.escape(value)
+        + rf"(?![{WORD_CHAR_CLASS}])"
+    )
+
+
+def _tech_pattern(value):
+    """
+    Технический код допускает реальные разделители между символами:
+    AC35L / AC 35L / AC-35L / AC/35L.
+
+    Важно: мы НЕ удаляем разделители из целого документа. Иначе
+    символы из разных слов могли случайно склеиваться в код.
+    """
+    return r"[\s._/+\\-]*".join(
+        re.escape(char)
+        for char in value
+    )
+
+
+def _requirement_pattern(kind, value):
+    if kind == "word":
+        return _word_pattern(value)
+
+    return _tech_pattern(value)
+
+
 def _requirement_matches_field(field, kind, value):
     field = field or ""
 
-    if kind == "word":
-        return value in field.lower()
-
-    return value in _compact(field)
+    return bool(
+        re.search(
+            _requirement_pattern(kind, value),
+            field,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _matches_fields(fields, requirements):
@@ -142,13 +182,6 @@ def _matches_fields(fields, requirements):
     return True
 
 
-def _tech_pattern(value):
-    return r"[\s._/+\\-]*".join(
-        re.escape(char)
-        for char in value
-    )
-
-
 def make_snippet(text, query, radius=180):
     if not text:
         return ""
@@ -157,26 +190,18 @@ def make_snippet(text, query, radius=180):
 
     # Для диагностических/технических запросов сначала показываем
     # совпадение самого кода (AC35L, КС55724, ОНК160...), а уже
-    # потом общих слов вроде Terex. Иначе ложные результаты трудно
-    # отличить от документов, где код действительно упомянут.
+    # потом общих слов вроде Terex/PAT.
     requirements = sorted(
         requirements,
         key=lambda item: 0 if item[0] == "tech" else 1,
     )
 
     for kind, value in requirements:
-        if kind == "word":
-            match = re.search(
-                re.escape(value),
-                text,
-                flags=re.IGNORECASE,
-            )
-        else:
-            match = re.search(
-                _tech_pattern(value),
-                text,
-                flags=re.IGNORECASE,
-            )
+        match = re.search(
+            _requirement_pattern(kind, value),
+            text,
+            flags=re.IGNORECASE,
+        )
 
         if not match:
             continue
@@ -202,6 +227,10 @@ def make_snippet(text, query, radius=180):
 
 
 def _rough_sql_filter(requirements):
+    """
+    Грубый SQL-фильтр только уменьшает число кандидатов.
+    Окончательная проверка всегда выполняется Python-регулярками.
+    """
     conditions = []
     parameters = []
 
@@ -230,6 +259,26 @@ def _rough_sql_filter(requirements):
         parameters.extend([pattern, pattern, pattern])
 
     return " AND ".join(conditions), parameters
+
+
+def _relevance_score(filename, filepath, content, requirements):
+    """
+    Имя и путь сильнее содержимого.
+
+    Это не меняет условие совпадения, а только поднимает наиболее
+    очевидные каталоги/руководства выше в выдаче.
+    """
+    score = 0
+
+    for kind, value in requirements:
+        if _requirement_matches_field(filename, kind, value):
+            score += 120
+        elif _requirement_matches_field(filepath, kind, value):
+            score += 80
+        elif _requirement_matches_field(content, kind, value):
+            score += 10
+
+    return score
 
 
 def search_files(query, limit=200):
@@ -272,7 +321,7 @@ def search_files(query, limit=200):
     finally:
         conn.close()
 
-    results = []
+    ranked = []
 
     for row in rows:
         (
@@ -284,33 +333,57 @@ def search_files(query, limit=200):
             is_cloud,
         ) = row
 
+        filename = filename or ""
+        filepath = filepath or ""
+        content = content or ""
+
         if not _matches_fields(
             (
-                filename or "",
-                filepath or "",
-                content or "",
+                filename,
+                filepath,
+                content,
             ),
             requirements,
         ):
             continue
 
-        snippet = make_snippet(content or "", query)
+        snippet = make_snippet(content, query)
 
         if not snippet:
             snippet = "Найдено в имени или пути файла"
 
-        results.append(
-            SearchResult(
-                file_id=file_id,
-                filename=filename or "",
-                extension=extension or "",
-                filepath=filepath or "",
-                snippet=snippet,
-                is_cloud=bool(is_cloud),
+        result = SearchResult(
+            file_id=file_id,
+            filename=filename,
+            extension=extension or "",
+            filepath=filepath,
+            snippet=snippet,
+            is_cloud=bool(is_cloud),
+        )
+
+        score = _relevance_score(
+            filename,
+            filepath,
+            content,
+            requirements,
+        )
+
+        ranked.append(
+            (
+                score,
+                filename.lower(),
+                result,
             )
         )
 
-        if len(results) >= limit:
-            break
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            item[1],
+        )
+    )
 
-    return results
+    return [
+        item[2]
+        for item in ranked[:limit]
+    ]
