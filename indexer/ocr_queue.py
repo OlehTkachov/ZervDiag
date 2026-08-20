@@ -9,11 +9,20 @@ from onedrive.hydrate import (
     dehydrate_file,
 )
 from readers.ocr_reader import (
-    ocr_pdf_pages,
+    ocr_document_pages,
 )
 
 
 MIN_CONTENT_CHARS = 10
+
+OCR_EXTENSIONS = (
+    ".pdf",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".tif",
+    ".tiff",
+)
 
 
 def get_pending_ocr_files():
@@ -30,18 +39,28 @@ def get_pending_ocr_files():
                 filepath,
                 is_cloud,
                 ocr_page,
-                ocr_total_pages
+                ocr_total_pages,
+                extension,
+                COALESCE(size, 0)
             FROM files
-            WHERE extension = '.pdf'
+            WHERE extension IN (
+                    '.pdf',
+                    '.jpg',
+                    '.jpeg',
+                    '.png',
+                    '.tif',
+                    '.tiff'
+                  )
               AND extraction_status IN (
                     'ocr_pending',
                     'ocr_processing'
                   )
             ORDER BY
                 CASE
-                    WHEN ocr_total_pages > 0
-                    THEN ocr_total_pages
-                    ELSE 2147483647
+                    WHEN extension = '.pdf'
+                         AND ocr_total_pages > 0
+                    THEN ocr_total_pages * 500000
+                    ELSE COALESCE(size, 0)
                 END,
                 id
             """
@@ -74,6 +93,31 @@ def _set_status(
                     if error
                     else None
                 ),
+                file_id,
+            ),
+        )
+
+        conn.commit()
+
+    finally:
+        conn.close()
+
+
+def _remember_total_pages(
+    file_id,
+    total_pages,
+):
+    conn = get_connection()
+
+    try:
+        conn.execute(
+            """
+            UPDATE files
+            SET ocr_total_pages = ?
+            WHERE id = ?
+            """,
+            (
+                int(total_pages or 0),
                 file_id,
             ),
         )
@@ -225,6 +269,8 @@ def process_ocr_file(
         is_cloud,
         ocr_page,
         ocr_total_pages,
+        extension,
+        file_size,
     ) = row
 
     is_cloud = bool(
@@ -236,6 +282,7 @@ def process_ocr_file(
     )
 
     hydrated = False
+    total_known = False
 
     try:
         if (
@@ -265,6 +312,7 @@ def process_ocr_file(
         print(
             f"OCR START: "
             f"{filename} "
+            f"[{extension}] "
             f"from page "
             f"{start_page + 1}",
             flush=True,
@@ -274,6 +322,15 @@ def process_ocr_file(
             page_number,
             total_pages,
         ):
+            nonlocal total_known
+
+            if not total_known:
+                _remember_total_pages(
+                    file_id,
+                    total_pages,
+                )
+                total_known = True
+
             print(
                 f"OCR page "
                 f"{page_number}/"
@@ -304,7 +361,7 @@ def process_ocr_file(
             )
 
         try:
-            ocr_pdf_pages(
+            ocr_document_pages(
                 filepath,
                 start_page=start_page,
                 page_callback=save_page,
