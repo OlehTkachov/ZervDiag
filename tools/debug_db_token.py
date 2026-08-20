@@ -42,8 +42,7 @@ def main():
                 filename,
                 extension,
                 filepath,
-                COALESCE(content, ''),
-                status
+                COALESCE(content, '')
             FROM files
             WHERE filename LIKE ?
                OR filepath LIKE ?
@@ -71,7 +70,7 @@ def main():
     print("TOTAL MATCHING DB ROWS:", total)
     print()
 
-    for file_id, filename, extension, filepath, content, status in rows:
+    for file_id, filename, extension, filepath, content in rows:
         name_hit = token.lower() in (filename or "").lower()
         path_hit = token.lower() in (filepath or "").lower()
         content_hit = token.lower() in (content or "").lower()
@@ -80,7 +79,6 @@ def main():
         print("ID:", file_id)
         print("FILE:", filename)
         print("TYPE:", extension)
-        print("STATUS:", status)
         print("PATH:", filepath)
         print(
             "SOURCES:",
