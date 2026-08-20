@@ -1,3 +1,4 @@
+import math
 import subprocess
 import tempfile
 import time
@@ -14,6 +15,11 @@ TESSERACT = (
 
 OCR_DPI = 250
 TESSERACT_PAGE_TIMEOUT = 180
+
+# Огромные TIF/схемы не отдаём Tesseract в исходном
+# гигантском разрешении. 16 Мп достаточно для OCR,
+# но существенно снижает память и время обработки.
+MAX_RENDER_PIXELS = 16_000_000
 
 
 def _check_stop(
@@ -113,29 +119,48 @@ def _tesseract_image(
     return stdout or ""
 
 
-def ocr_image(
-    filepath,
-    stop_callback=None,
+def _render_matrix(
+    page,
 ):
-    try:
-        return _tesseract_image(
-            filepath,
-            stop_callback=stop_callback,
+    """
+    250 DPI для обычных страниц, но с ограничением
+    итогового растра для очень больших схем/TIF.
+    """
+
+    scale = OCR_DPI / 72.0
+
+    width = max(
+        1.0,
+        page.rect.width * scale,
+    )
+
+    height = max(
+        1.0,
+        page.rect.height * scale,
+    )
+
+    pixels = width * height
+
+    limited = False
+
+    if pixels > MAX_RENDER_PIXELS:
+        factor = math.sqrt(
+            MAX_RENDER_PIXELS / pixels
         )
 
-    except InterruptedError:
-        raise
+        scale *= factor
+        limited = True
 
-    except Exception as error:
-        print(
-            f"OCR_IMAGE_ERROR: "
-            f"{filepath}: {error}",
-            flush=True,
-        )
-        return ""
+    return (
+        pymupdf.Matrix(
+            scale,
+            scale,
+        ),
+        limited,
+    )
 
 
-def ocr_pdf_pages(
+def ocr_document_pages(
     filepath,
     start_page=0,
     page_callback=None,
@@ -143,13 +168,14 @@ def ocr_pdf_pages(
     stop_callback=None,
 ):
     """
-    OCR PDF начиная с start_page (0-based).
+    Постраничный OCR для PDF и изображений.
 
-    После каждой страницы page_callback получает:
-        page_number (1-based), total_pages, text
+    PyMuPDF открывает PDF/JPG/PNG/TIF/TIFF как документ.
+    Для многостраничного TIFF сохраняется тот же механизм
+    resume, что и для PDF.
 
-    Поэтому вызывающий код может сохранять прогресс
-    в SQLite после КАЖДОЙ страницы.
+    После каждой полностью готовой страницы page_callback
+    получает page_number, total_pages, text.
     """
 
     doc = pymupdf.open(
@@ -191,15 +217,24 @@ def ocr_pdf_pages(
                 page_index
             ]
 
-            matrix = pymupdf.Matrix(
-                OCR_DPI / 72,
-                OCR_DPI / 72,
+            matrix, limited = (
+                _render_matrix(
+                    page
+                )
             )
 
             pix = page.get_pixmap(
                 matrix=matrix,
                 alpha=False,
             )
+
+            if limited:
+                print(
+                    f"OCR_RENDER_LIMIT: "
+                    f"{pix.width}x{pix.height} "
+                    f"{filepath}",
+                    flush=True,
+                )
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 image_path = (
@@ -227,3 +262,66 @@ def ocr_pdf_pages(
 
     finally:
         doc.close()
+
+
+def ocr_pdf_pages(
+    filepath,
+    start_page=0,
+    page_callback=None,
+    progress_callback=None,
+    stop_callback=None,
+):
+    """Совместимый alias для старого вызова."""
+
+    return ocr_document_pages(
+        filepath,
+        start_page=start_page,
+        page_callback=page_callback,
+        progress_callback=progress_callback,
+        stop_callback=stop_callback,
+    )
+
+
+def ocr_image(
+    filepath,
+    stop_callback=None,
+):
+    """
+    Совместимый вызов OCR одиночного изображения.
+    Теперь тоже проходит через ограничение размера.
+    """
+
+    parts = []
+
+    def save_page(
+        page_number,
+        total_pages,
+        text,
+    ):
+        if text:
+            parts.append(
+                text
+            )
+
+    try:
+        ocr_document_pages(
+            filepath,
+            start_page=0,
+            page_callback=save_page,
+            stop_callback=stop_callback,
+        )
+
+    except InterruptedError:
+        raise
+
+    except Exception as error:
+        print(
+            f"OCR_IMAGE_ERROR: "
+            f"{filepath}: {error}",
+            flush=True,
+        )
+        return ""
+
+    return "\n".join(
+        parts
+    )
