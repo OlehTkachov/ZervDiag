@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from database.db import get_connection
 from readers.document_reader import (
     OCRRequired,
@@ -10,6 +12,14 @@ from onedrive.hydrate import (
 
 
 MIN_CONTENT_CHARS = 10
+
+OCR_IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".tif",
+    ".tiff",
+}
 
 
 def _set_status(
@@ -94,14 +104,18 @@ def load_and_index_file(
     """
     Быстрая обработка одного файла.
 
-    Для сканированного PDF:
-        только ставит ocr_pending.
-        OCR здесь НЕ выполняется.
+    PDF без текстового слоя ставится в OCR-очередь.
+    JPG/PNG/TIF/TIFF ставятся в OCR-очередь СРАЗУ,
+    без hydrate и без запуска Tesseract в быстром проходе.
     """
 
     filepath = str(
         filepath
     )
+
+    extension = Path(
+        filepath
+    ).suffix.lower()
 
     hydrated = False
 
@@ -110,6 +124,26 @@ def load_and_index_file(
             file_id,
             "processing",
         )
+
+        # Изображения не нужно скачивать только ради того,
+        # чтобы понять, что им нужен OCR. Сразу ставим в очередь.
+        if extension in OCR_IMAGE_EXTENSIONS:
+            required = OCRRequired(
+                total_pages=0,
+                preview="",
+            )
+
+            _queue_ocr(
+                file_id,
+                required,
+            )
+
+            print(
+                f"OCR_QUEUED_IMAGE: {filepath}",
+                flush=True,
+            )
+
+            return True
 
         if is_cloud:
             print(
@@ -172,10 +206,16 @@ def load_and_index_file(
                 required,
             )
 
+            pages = (
+                str(required.total_pages)
+                if required.total_pages
+                else "?"
+            )
+
             print(
                 f"OCR_QUEUED: "
                 f"{filepath} "
-                f"({required.total_pages} pages)",
+                f"({pages} pages)",
                 flush=True,
             )
 
