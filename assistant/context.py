@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 
+from assistant.query_planner import plan_search_query
 from database.db import get_connection
 from search.search import (
     FAULT_CODE_RE,
@@ -113,13 +114,22 @@ def retrieve_local_context(
     Важно:
     - документы не гидратируются и не скачиваются;
     - наружу ничего не отправляется;
-    - search_query можно позже сформировать отдельным query-planner'ом.
+    - разговорный вопрос сначала проходит консервативный query planner;
+    - search_query можно передать явно, если нужен точный контроль.
     """
     question = (question or "").strip()
-    retrieval_query = (
-        (search_query or "").strip()
-        or question
-    )
+
+    if search_query is None:
+        plan = plan_search_query(
+            question
+        )
+        retrieval_query = (
+            plan.search_query
+        )
+    else:
+        retrieval_query = (
+            search_query or ""
+        ).strip()
 
     if not retrieval_query:
         return []
