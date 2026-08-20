@@ -13,6 +13,7 @@ TECH_RE = re.compile(
 
 ALPHA_RE = re.compile(r"^[A-Za-zА-Яа-яЁё]+$")
 DIGIT_OR_SUFFIX_RE = re.compile(r"^\d+[A-Za-zА-Яа-яЁё]*$")
+FAULT_CODE_RE = re.compile(r"^[A-Za-zА-Яа-яЁё]\d{1,4}$")
 
 TECH_PREFIX_STOPWORDS = {
     "в", "на", "за", "от", "до", "по", "и", "или",
@@ -182,6 +183,76 @@ def _matches_fields(fields, requirements):
     return True
 
 
+def _diagnostic_context(requirements):
+    """
+    Запрос вида "PAT DS350 E15" понимаем как:
+        PAT / DS350 — контекст оборудования;
+        E15        — код, который ищем в документе.
+
+    Консервативно распознаём только короткие коды с одной буквой
+    и цифрами (E10, E15, F123...), чтобы модели вроде AC35L не
+    превращались в диагностический хвост автоматически.
+    """
+    if len(requirements) < 2:
+        return []
+
+    last_kind, last_value = requirements[-1]
+
+    if (
+        last_kind == "tech"
+        and FAULT_CODE_RE.fullmatch(last_value)
+    ):
+        return requirements[:-1]
+
+    return []
+
+
+def _matches_query(
+    filename,
+    filepath,
+    content,
+    requirements,
+):
+    """
+    Точный матч + защита от случайных совпадений в больших каталогах.
+
+    Если запрос заканчивается коротким кодом ошибки, хотя бы один
+    предыдущий контекстный элемент должен находиться в имени файла
+    или в пути. Сам код ошибки может быть только внутри текста.
+    """
+    if not _matches_fields(
+        (
+            filename,
+            filepath,
+            content,
+        ),
+        requirements,
+    ):
+        return False
+
+    context = _diagnostic_context(
+        requirements
+    )
+
+    if not context:
+        return True
+
+    identity_fields = (
+        filename,
+        filepath,
+    )
+
+    return any(
+        _requirement_matches_field(
+            field,
+            kind,
+            value,
+        )
+        for kind, value in context
+        for field in identity_fields
+    )
+
+
 def make_snippet(text, query, radius=180):
     if not text:
         return ""
@@ -337,12 +408,10 @@ def search_files(query, limit=200):
         filepath = filepath or ""
         content = content or ""
 
-        if not _matches_fields(
-            (
-                filename,
-                filepath,
-                content,
-            ),
+        if not _matches_query(
+            filename,
+            filepath,
+            content,
             requirements,
         ):
             continue
