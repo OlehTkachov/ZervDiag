@@ -7,12 +7,16 @@ import pymupdf
 from docx import Document
 from openpyxl import load_workbook
 
-from readers.ocr_reader import (
-    ocr_image,
-)
-
 
 MIN_PDF_TEXT_CHARS = 80
+
+OCR_IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".tif",
+    ".tiff",
+}
 
 
 class OCRRequired(Exception):
@@ -22,7 +26,7 @@ class OCRRequired(Exception):
         preview="",
     ):
         super().__init__(
-            "PDF requires OCR"
+            "Document requires OCR"
         )
 
         self.total_pages = int(
@@ -402,9 +406,9 @@ def read_document(
     """
     Быстрое извлечение для ОСНОВНОЙ индексации.
 
-    Важно:
-    PDF без нормального текстового слоя вызывает
-    OCRRequired и НЕ запускает OCR.
+    PDF без нормального текстового слоя вызывает OCRRequired.
+    JPG/PNG/TIF/TIFF тоже вызывают OCRRequired.
+    Tesseract здесь никогда не запускается.
     """
 
     extension = Path(
@@ -455,16 +459,10 @@ def read_document(
             filepath
         )
 
-    if extension in {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".tif",
-        ".tiff",
-    }:
-        return ocr_image(
-            filepath,
-            stop_callback=stop_callback,
+    if extension in OCR_IMAGE_EXTENSIONS:
+        raise OCRRequired(
+            total_pages=0,
+            preview="",
         )
 
     return ""
