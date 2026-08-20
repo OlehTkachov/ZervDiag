@@ -14,6 +14,14 @@ TECHNICAL_EXTENSIONS = {
     ".png", ".tif", ".tiff", ".bmp",
 }
 
+# Подтверждённые форматы программного обеспечения техники.
+# Они НЕ оцениваются как обычные документы и никогда автоматически
+# не отправляются в карантин. Новые расширения добавляем только после
+# проверки реального образца.
+PROGRAMMATIC_EXTENSIONS = {
+    ".p160",
+}
+
 MEDIA_OR_BINARY_EXTENSIONS = {
     ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".mp3", ".wav",
     ".exe", ".msi", ".dll", ".iso",
@@ -70,6 +78,7 @@ class GroupStat:
     suspicious: int
     review: int
     useful: int
+    programmatic: int
 
 
 def _category_from_score(score):
@@ -81,14 +90,28 @@ def _category_from_score(score):
 
 
 def _score_row(filename, filepath, extension, size, extraction_status, content):
-    score = 50
-    reasons = []
-
     filename = filename or ""
     filepath = filepath or ""
     extension = (extension or "").lower()
     content = content or ""
     content_chars = len(content.strip())
+
+    # Программатика вынесена за рамки обычной оценки.
+    # 100 используется только как безопасное внутреннее значение для сортировки;
+    # в UI для этой категории показывается прочерк вместо оценки.
+    if extension in PROGRAMMATIC_EXTENSIONS:
+        return (
+            100,
+            "programmatic",
+            (
+                "программатика — защищённый файл",
+                f"подтверждённый формат {extension}",
+            ),
+            content_chars,
+        )
+
+    score = 50
+    reasons = []
     combined_meta = f"{filename}\n{filepath}"
 
     if extension in TECHNICAL_EXTENSIONS:
@@ -235,6 +258,7 @@ def summarize(records):
         "useful": counts.get("useful", 0),
         "review": counts.get("review", 0),
         "suspicious": counts.get("suspicious", 0),
+        "programmatic": counts.get("programmatic", 0),
     }
 
 
@@ -250,6 +274,7 @@ def _build_group_stats(groups):
                 suspicious=counts.get("suspicious", 0),
                 review=counts.get("review", 0),
                 useful=counts.get("useful", 0),
+                programmatic=counts.get("programmatic", 0),
             )
         )
 
@@ -347,7 +372,7 @@ def export_records_csv(records, destination):
         for record in records:
             writer.writerow(
                 [
-                    record.score,
+                    "" if record.category == "programmatic" else record.score,
                     record.category,
                     record.filename,
                     record.extension,
@@ -385,6 +410,10 @@ def move_to_quarantine(records, library_root, quarantine_root, log_path=None):
 
     for record in records:
         source = Path(record.filepath)
+
+        if record.category == "programmatic":
+            skipped.append((record, "ПРОГРАММАТИКА — защищённый файл"))
+            continue
 
         if record.is_cloud:
             skipped.append((record, "облачный файл — не перемещён автоматически"))
