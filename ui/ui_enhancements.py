@@ -2,6 +2,8 @@ from types import MethodType
 
 from PySide6.QtCore import QTimer
 
+from i18n.catalog import tr
+from i18n.settings import get_language
 from search.web_search import open_web_search
 from ui.search_not_found import (
     ACTION_EDIT,
@@ -12,14 +14,10 @@ from ui.search_not_found import (
 
 def install_ui_enhancements(main_window):
     """
-    V14 UI-слой поверх стабильного MainWindow V13.
+    V14 UI layer over the stable V13 MainWindow.
 
-    Намеренно не переписывает большой ui/main_window.py:
-    - Enter всегда обрабатывается предсказуемо;
-    - повторный запрос во время поиска ставится следующим;
-    - нулевой результат показывает заметный диалог;
-    - из диалога можно открыть интернет-поиск;
-    - кнопка OCR получает понятное пользователю название.
+    It keeps the tested search implementation intact while improving
+    Enter handling, queued searches, no-result feedback and OCR naming.
     """
     if getattr(
         main_window,
@@ -40,6 +38,7 @@ def install_ui_enhancements(main_window):
 
     def enhanced_update_ocr_button(self):
         count = original_update_ocr_button()
+        language = get_language(self.settings)
 
         worker_running = bool(
             self.ocr_worker
@@ -48,7 +47,7 @@ def install_ui_enhancements(main_window):
 
         if not worker_running:
             self.btn_ocr.setText(
-                f"Распознать сканы ({count})"
+                tr("nav.scan_recognition", language, count=count)
             )
 
         return count
@@ -61,7 +60,7 @@ def install_ui_enhancements(main_window):
             and self.ocr_worker.isRunning()
         ):
             self.btn_ocr.setText(
-                "Остановить распознавание"
+                tr("nav.stop_recognition", get_language(self.settings))
             )
 
     def enhanced_perform_search(self, *args):
@@ -70,6 +69,7 @@ def install_ui_enhancements(main_window):
             .text()
             .strip()
         )
+        language = get_language(self.settings)
 
         if not query:
             original_perform_search()
@@ -82,12 +82,11 @@ def install_ui_enhancements(main_window):
             if query != self._v14_active_query:
                 self._v14_queued_query = query
                 self.status.setText(
-                    "Текущий поиск ещё выполняется. "
-                    f"Следующий запрос: {query}"
+                    tr("search.next", language, query=query)
                 )
             else:
                 self.status.setText(
-                    f"Поиск «{query}» выполняется..."
+                    tr("search.running", language, query=query)
                 )
 
             return
@@ -137,13 +136,15 @@ def install_ui_enhancements(main_window):
         if results:
             return
 
+        language = get_language(self.settings)
         self.status.setText(
-            f'По запросу «{query}» документы не найдены.'
+            tr("search.not_found_text", language, query=query)
         )
 
         action = show_search_not_found(
             self,
             query,
+            language=language,
         )
 
         if action == ACTION_WEB:
@@ -151,12 +152,11 @@ def install_ui_enhancements(main_window):
 
             if opened:
                 self.status.setText(
-                    f'Локально ничего не найдено. '
-                    f'Открыт интернет-поиск: «{query}».'
+                    tr("search.web_opened", language, query=query)
                 )
             else:
                 self.status.setText(
-                    "Не удалось открыть системный браузер."
+                    tr("search.web_failed", language)
                 )
 
         elif action == ACTION_EDIT:
@@ -201,8 +201,8 @@ def install_ui_enhancements(main_window):
         main_window,
     )
 
-    # Старые connections созданы внутри MainWindow.create_ui().
-    # Переподключаем только три поисковых сигнала к V14-обработчику.
+    # Old connections were created inside MainWindow.create_ui().
+    # Reconnect only the three search signals to the V14 handler.
     for signal in (
         main_window.search_input.returnPressed,
         main_window.search_button.clicked,
@@ -221,8 +221,7 @@ def install_ui_enhancements(main_window):
     main_window.search_button.setAutoDefault(True)
 
     main_window.btn_ocr.setToolTip(
-        "Извлечь текст из отсканированных PDF "
-        "и изображений, чтобы они участвовали в поиске."
+        tr("scan.tooltip", get_language(main_window.settings))
     )
 
     main_window.update_ocr_button()
