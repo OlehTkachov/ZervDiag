@@ -54,9 +54,10 @@ Copy-Item `
     ".\dist\ZervDiag\ZervDiagScheduledIndex.exe" `
     -Force
 
+$programFilesX86 = ${env:ProgramFiles(x86)}
 $innoCandidates = @(
-    "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+    $(if ($programFilesX86) { Join-Path $programFilesX86 "Inno Setup 6\ISCC.exe" }),
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe" })
 ) | Where-Object { $_ -and (Test-Path $_) }
 
 if (-not $innoCandidates) {
