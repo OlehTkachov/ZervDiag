@@ -2,6 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from app_paths import is_frozen
 from app_version import APP_VERSION
 from beta_runtime import (
     configure_black_box_paths,
@@ -48,6 +49,9 @@ def main():
     configure_packaged_scheduler(windows_task)
 
     window = MainWindow()
+    if is_frozen():
+        window.setWindowTitle(f"ZervDiag Beta {APP_VERSION}")
+
     install_database_status(window)
     install_manual_table_resizing(window)
     install_ui_enhancements(window)
