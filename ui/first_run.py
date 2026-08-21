@@ -121,7 +121,7 @@ def ensure_database_ready(parent=None):
     while True:
         box = QMessageBox(parent)
         box.setWindowTitle("ZervDiag Beta — первый запуск")
-        box.setIcon(QMessageBox.Information)
+        box.setIcon(QMessageBox.Icon.Information)
         box.setText("Локальная база ZervDiag ещё не подготовлена.")
         box.setInformativeText(
             "Можно импортировать уже проиндексированную zervdiag.db "
@@ -131,15 +131,15 @@ def ensure_database_ready(parent=None):
 
         import_button = box.addButton(
             "Импортировать готовую базу",
-            QMessageBox.AcceptRole,
+            QMessageBox.ButtonRole.AcceptRole,
         )
         create_button = box.addButton(
             "Создать новую базу",
-            QMessageBox.ActionRole,
+            QMessageBox.ButtonRole.ActionRole,
         )
         exit_button = box.addButton(
             "Выйти",
-            QMessageBox.RejectRole,
+            QMessageBox.ButtonRole.RejectRole,
         )
 
         box.setDefaultButton(import_button)
