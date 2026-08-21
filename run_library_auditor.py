@@ -37,11 +37,6 @@ class AuditorWindowWithUserRules(AuditorWindow):
         self.btn_keep_file.setToolTip(
             "Исключить выбранный файл из последующих проверок Auditor"
         )
-        self.btn_keep_folder = QPushButton("Папка нормальная")
-        self.btn_keep_folder.setToolTip(
-            "Исключить папку выбранного файла и всё её содержимое "
-            "из последующих проверок Auditor"
-        )
         self.btn_restore = QPushButton("Вернуть в проверку")
         self.btn_restore.setToolTip(
             "Удалить пользовательское исключение для выбранного файла или папки"
@@ -49,7 +44,6 @@ class AuditorWindowWithUserRules(AuditorWindow):
 
         decision_row.addWidget(QLabel("Решение пользователя:"))
         decision_row.addWidget(self.btn_keep_file)
-        decision_row.addWidget(self.btn_keep_folder)
         decision_row.addWidget(self.btn_restore)
         decision_row.addStretch(1)
 
@@ -66,18 +60,136 @@ class AuditorWindowWithUserRules(AuditorWindow):
         page.layout().addWidget(self.selected_path_label)
 
         self.btn_keep_file.clicked.connect(self._mark_files_needed)
-        self.btn_keep_folder.clicked.connect(self._mark_folder_normal)
         self.btn_restore.clicked.connect(self._restore_selected_rules)
         self.files_table.itemSelectionChanged.connect(
             self._update_selected_path
         )
 
+    def _build_group_tab(self):
+        super()._build_group_tab()
+
+        page = self.tabs.widget(self.tabs.count() - 1)
+        folder_decision_row = QHBoxLayout()
+
+        self.btn_keep_folder = QPushButton("Папка нормальная")
+        self.btn_keep_folder.setToolTip(
+            "Исключить выбранную папку и всё её содержимое "
+            "из последующих проверок Auditor"
+        )
+
+        folder_decision_row.addWidget(QLabel("Решение пользователя:"))
+        folder_decision_row.addWidget(self.btn_keep_folder)
+        folder_decision_row.addStretch(1)
+        page.layout().insertLayout(1, folder_decision_row)
+
+        self.btn_keep_folder.clicked.connect(
+            self._mark_selected_group_folder_normal
+        )
+        self.group_mode.currentIndexChanged.connect(
+            self._update_folder_button_state
+        )
+        self.group_table.itemSelectionChanged.connect(
+            self._update_folder_button_state
+        )
+        self._update_folder_button_state()
+
     def _set_busy(self, busy):
         super()._set_busy(busy)
         enabled = not busy
         self.btn_keep_file.setEnabled(enabled)
-        self.btn_keep_folder.setEnabled(enabled)
         self.btn_restore.setEnabled(enabled)
+        self._update_folder_button_state(enabled)
+
+    def _update_folder_button_state(self, enabled=True):
+        if not hasattr(self, "btn_keep_folder"):
+            return
+
+        if not isinstance(enabled, bool):
+            enabled = True
+
+        folder_mode = self.group_mode.currentData() == "folders"
+        has_selection = bool(
+            self.group_table.selectionModel().selectedRows()
+        )
+        self.btn_keep_folder.setEnabled(
+            enabled and folder_mode and has_selection
+        )
+
+    def _selected_group_folder(self):
+        if self.group_mode.currentData() != "folders":
+            return None
+
+        selected = self.group_table.selectionModel().selectedRows()
+        if not selected:
+            return None
+
+        item = self.group_table.item(selected[0].row(), 0)
+        if not item:
+            return None
+
+        group_name = item.text().strip()
+        root = self.settings.value("documentation_folder", "")
+        if not root:
+            return None
+
+        group_path = Path(group_name)
+        if group_name == ".":
+            return str(Path(root))
+        if group_path.is_absolute():
+            return str(group_path)
+        return str(Path(root) / group_path)
+
+    def _mark_selected_group_folder_normal(self):
+        if self.group_mode.currentData() != "folders":
+            QMessageBox.information(
+                self,
+                "Папка нормальная",
+                "Переключите группировку на «По папкам».",
+            )
+            return
+
+        folder = self._selected_group_folder()
+        if not folder:
+            QMessageBox.information(
+                self,
+                "Папка нормальная",
+                "Выберите папку в таблице. Если корень библиотеки не выбран, "
+                "сначала укажите его кнопкой «Корень библиотеки...»."
+            )
+            return
+
+        library_root = self.settings.value("documentation_folder", "")
+        try:
+            is_root = Path(folder).resolve() == Path(library_root).resolve()
+        except Exception:
+            is_root = False
+
+        if is_root:
+            QMessageBox.warning(
+                self,
+                "Корень библиотеки",
+                "Нельзя пометить нормальной всю библиотеку целиком. "
+                "Выберите конкретную папку внутри неё.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Папка нормальная?",
+            "Library Auditor перестанет учитывать эту папку "
+            "И ВСЕ ЕЁ ВЛОЖЕННЫЕ ПАПКИ при последующих пересчётах:\n\n"
+            f"{folder}\n\n"
+            "Файлы никуда не перемещаются и из основной базы не удаляются.\n\n"
+            "Продолжить?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+
+        if answer != QMessageBox.Yes:
+            return
+
+        self.exclusions.add_folder(folder)
+        self._start_load()
 
     def _is_user_excluded(self, record):
         # Программатика остаётся в своей защищённой категории всегда.
@@ -103,6 +215,7 @@ class AuditorWindowWithUserRules(AuditorWindow):
         self.exclusions.reload()
         super()._load_finished(records)
         self._refresh_summary_with_exclusions()
+        self._update_folder_button_state()
 
     def _refresh_summary_with_exclusions(self):
         active = self._active_records()
@@ -204,6 +317,7 @@ class AuditorWindowWithUserRules(AuditorWindow):
             super()._refresh_groups()
         finally:
             self.records = original
+        self._update_folder_button_state()
 
     def _refresh_duplicates(self):
         original = self.records
@@ -268,37 +382,6 @@ class AuditorWindowWithUserRules(AuditorWindow):
         for record in records:
             self.exclusions.add_file(record.filepath)
 
-        self._start_load()
-
-    def _mark_folder_normal(self):
-        records = self._selected_records()
-
-        if not records:
-            QMessageBox.information(
-                self,
-                "Папка нормальная",
-                "Выберите любой файл из папки, которую нужно исключить.",
-            )
-            return
-
-        folder = str(Path(records[0].filepath).parent)
-
-        answer = QMessageBox.question(
-            self,
-            "Папка нормальная?",
-            "Library Auditor перестанет учитывать эту папку "
-            "И ВСЕ ЕЁ ВЛОЖЕННЫЕ ПАПКИ при последующих пересчётах:\n\n"
-            f"{folder}\n\n"
-            "Файлы никуда не перемещаются и из основной базы не удаляются.\n\n"
-            "Продолжить?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-
-        if answer != QMessageBox.Yes:
-            return
-
-        self.exclusions.add_folder(folder)
         self._start_load()
 
     def _restore_selected_rules(self):
