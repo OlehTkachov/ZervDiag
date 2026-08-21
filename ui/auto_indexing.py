@@ -188,7 +188,6 @@ class AutoIndexSettingsDialog(QDialog):
             "Если компьютер был выключен — выполнить пропущенную индексацию при запуске ZervDiag"
         )
         self.run_overdue.setChecked(config["run_overdue"])
-        self.run_overdue.setWordWrap(True)
         form.addRow(self.run_overdue)
 
         self.last_label = QLabel(_fmt_dt(config["last_success"]))
