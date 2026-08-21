@@ -300,11 +300,19 @@ def _convert_with_libreoffice(
 def read_doc(
     filepath,
 ):
+    """
+    Legacy .DOC is converted to .DOCX first, then parsed structurally.
+
+    The previous DOC -> TXT path depended on LibreOffice text-export
+    encoding. On old Cyrillic documents that could replace thousands of
+    characters with U+FFFD and silently lose diagnostic codes. DOCX keeps
+    Unicode text and tables intact for python-docx.
+    """
     converted, directory = (
         _convert_with_libreoffice(
             filepath,
-            "txt:Text",
-            ".txt",
+            "docx",
+            ".docx",
         )
     )
 
@@ -312,9 +320,8 @@ def read_doc(
         return ""
 
     try:
-        return converted.read_text(
-            encoding="utf-8",
-            errors="replace",
+        return read_docx(
+            converted
         )
 
     finally:
