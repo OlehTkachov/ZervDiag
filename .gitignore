@@ -8,6 +8,11 @@ data/
 *.db-wal
 *.db-shm
 
+build/
+build-scheduled/
+dist/
+*.spec
+
 .vscode/
 .idea/
 backup_before_*/
