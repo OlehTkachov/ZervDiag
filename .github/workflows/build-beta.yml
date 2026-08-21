@@ -1,0 +1,61 @@
+name: Build ZervDiag Beta
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v15-beta-installer
+    paths:
+      - "**/*.py"
+      - "requirements*.txt"
+      - "packaging/**"
+      - ".github/workflows/build-beta.yml"
+
+jobs:
+  build-windows-beta:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: "x64"
+
+      - name: Syntax check
+        shell: pwsh
+        run: python -m compileall -q .
+
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+          }
+
+      - name: Build application and installer
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\packaging\build_beta.ps1 -Python python
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $setup = ".\dist\installer\ZervDiag_Beta_Setup.exe"
+          if (-not (Test-Path $setup)) {
+            throw "Installer was not created: $setup"
+          }
+          Get-Item $setup | Select-Object FullName, Length
+          Get-FileHash $setup -Algorithm SHA256
+
+      - name: Upload beta installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZervDiag-Beta-Setup
+          path: dist/installer/ZervDiag_Beta_Setup.exe
+          if-no-files-found: error
+          retention-days: 14
