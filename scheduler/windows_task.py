@@ -172,6 +172,7 @@ def _schedule_arguments(config):
 
 
 def sync_windows_task(settings):
+    """Create/update after an explicit settings save, or remove when disabled."""
     config = _read_config(settings)
 
     if not config["enabled"] or not windows_task_enabled(settings):
@@ -186,6 +187,21 @@ def sync_windows_task(settings):
     )
     settings.sync()
     return ok, message
+
+
+def ensure_windows_task(settings):
+    """Startup reconciliation without resetting an existing interval schedule."""
+    config = _read_config(settings)
+    should_exist = config["enabled"] and windows_task_enabled(settings)
+    exists = task_exists()
+
+    if should_exist and exists:
+        return True, "Task already registered"
+
+    if not should_exist and not exists:
+        return True, "Task already absent"
+
+    return sync_windows_task(settings)
 
 
 def _patch_settings_dialog():
@@ -333,9 +349,10 @@ def install_windows_scheduler(main_window):
         main_window.settings
     )
 
-    # Existing users may already have auto-indexing enabled before this
-    # V14 block is installed. Create/update the Windows task once at startup.
+    # Existing users may already have automatic indexing enabled before this
+    # V14 block is installed. Create a missing task or remove a stale one,
+    # but do not recreate an existing task and reset its N-day anchor.
     QTimer.singleShot(
         1800,
-        lambda: sync_windows_task(main_window.settings),
+        lambda: ensure_windows_task(main_window.settings),
     )
