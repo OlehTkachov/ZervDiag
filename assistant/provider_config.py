@@ -88,7 +88,7 @@ def _protect_windows_dpapi(data):
 
     if not crypt32.CryptProtectData(
         ctypes.byref(input_blob),
-        "ZervDiag AI API key",
+        ctypes.c_wchar_p("ZervDiag AI API key"),
         None,
         None,
         None,
