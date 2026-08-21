@@ -1,42 +1,37 @@
 from PySide6.QtWidgets import QMessageBox
 
+from i18n.catalog import tr
+
 
 ACTION_WEB = "web"
 ACTION_EDIT = "edit"
 ACTION_CLOSE = "close"
 
 
-def show_search_not_found(parent, query):
-    """
-    Показывает заметное сообщение, когда локальная база ничего не нашла.
-
-    Возвращает одно из:
-      - ACTION_WEB  — пользователь хочет искать в интернете;
-      - ACTION_EDIT — пользователь хочет изменить запрос;
-      - ACTION_CLOSE.
-    """
+def show_search_not_found(parent, query, language="ru"):
+    """Show a localized notice when the local database has no matches."""
     query = (query or "").strip()
 
     dialog = QMessageBox(parent)
     dialog.setIcon(QMessageBox.Information)
-    dialog.setWindowTitle("Документ не найден")
+    dialog.setWindowTitle(tr("search.not_found_title", language))
     dialog.setText(
-        f'По запросу «{query}» документы в локальной базе не найдены.'
+        tr("search.not_found_text", language, query=query)
     )
     dialog.setInformativeText(
-        "Можно изменить запрос или выполнить поиск в интернете."
+        tr("search.not_found_info", language)
     )
 
     web_button = dialog.addButton(
-        "Искать в интернете",
+        tr("search.web", language),
         QMessageBox.ActionRole,
     )
     edit_button = dialog.addButton(
-        "Изменить запрос",
+        tr("search.edit_query", language),
         QMessageBox.AcceptRole,
     )
     close_button = dialog.addButton(
-        "Закрыть",
+        tr("common.close", language),
         QMessageBox.RejectRole,
     )
 
