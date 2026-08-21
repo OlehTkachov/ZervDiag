@@ -42,6 +42,35 @@ def _priority_requirements(requirements):
     return faults + tech + words
 
 
+def _text_is_usable(text):
+    """Reject irreversibly damaged extraction before it reaches an LLM."""
+    text = (text or "").strip()
+    if not text:
+        return False
+
+    replacement_count = text.count("\ufffd")
+
+    # A couple of replacement glyphs in a large manual are tolerable. Long
+    # runs / a noticeable percentage mean the original decoder already lost
+    # bytes, so trying to 'repair' that text would invent information.
+    if replacement_count >= 12:
+        return False
+
+    if replacement_count and replacement_count / max(1, len(text)) >= 0.02:
+        return False
+
+    visible = sum(
+        1
+        for char in text
+        if char.isprintable() or char in "\r\n\t"
+    )
+
+    if visible / max(1, len(text)) < 0.85:
+        return False
+
+    return True
+
+
 def _extract_context_chunk(
     text,
     requirements,
@@ -115,7 +144,8 @@ def retrieve_local_context(
     - документы не гидратируются и не скачиваются;
     - наружу ничего не отправляется;
     - разговорный вопрос сначала проходит консервативный query planner;
-    - search_query можно передать явно, если нужен точный контроль.
+    - search_query можно передать явно, если нужен точный контроль;
+    - повреждённый после старого декодирования текст не передаётся модели.
     """
     question = (question or "").strip()
 
@@ -134,9 +164,16 @@ def retrieve_local_context(
     if not retrieval_query:
         return []
 
+    # Берём кандидатов с запасом: часть старых .DOC может содержать уже
+    # необратимо испорченный текст и будет отфильтрована ниже.
+    candidate_limit = max(
+        max_documents,
+        max_documents * 4,
+    )
+
     results = search_files(
         retrieval_query,
-        limit=max_documents,
+        limit=candidate_limit,
     )
 
     if not results:
@@ -183,6 +220,9 @@ def retrieve_local_context(
     used_chars = 0
 
     for result in results:
+        if len(sources) >= max_documents:
+            break
+
         row = by_id.get(
             result.file_id
         )
@@ -197,7 +237,7 @@ def retrieve_local_context(
             content,
         ) = row
 
-        if not (content or "").strip():
+        if not _text_is_usable(content):
             continue
 
         remaining = (
@@ -219,7 +259,7 @@ def retrieve_local_context(
             max_chars=allowed_chars,
         )
 
-        if not context:
+        if not context or not _text_is_usable(context):
             continue
 
         sources.append(
