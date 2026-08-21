@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from assistant.service import prepare_assistant_request
@@ -128,9 +129,9 @@ class AssistantDialog(QDialog):
         self.worker = None
         self.preparation = None
         self.logger = get_app_logger()
+        self._geometry_applied = False
 
         self.setWindowTitle(_t(self.language, "title"))
-        self.resize(1450, 860)
 
         root = QVBoxLayout(self)
 
@@ -170,7 +171,7 @@ class AssistantDialog(QDialog):
 
         splitter = QSplitter()
 
-        left = QDialog()
+        left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(QLabel(_t(self.language, "sources")))
@@ -198,7 +199,7 @@ class AssistantDialog(QDialog):
         left_layout.addWidget(self.sources_table)
         splitter.addWidget(left)
 
-        right = QDialog()
+        right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.addWidget(QLabel(_t(self.language, "preview")))
@@ -219,6 +220,64 @@ class AssistantDialog(QDialog):
         self.copy_button.clicked.connect(self.copy_context)
         self.close_button.clicked.connect(self.reject)
         self.sources_table.cellDoubleClicked.connect(self.open_source)
+
+    def _fit_to_available_screen(self):
+        screen = self.main_window.screen() or QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1200, 760)
+            return
+
+        available = screen.availableGeometry()
+
+        target_width = min(
+            1600,
+            int(available.width() * 0.94),
+        )
+        target_height = min(
+            950,
+            int(available.height() * 0.90),
+        )
+
+        if available.width() >= 720:
+            target_width = max(720, target_width)
+        else:
+            target_width = available.width()
+
+        if available.height() >= 560:
+            target_height = max(560, target_height)
+        else:
+            target_height = available.height()
+
+        target_width = min(target_width, available.width())
+        target_height = min(target_height, available.height())
+
+        x = available.x() + max(
+            0,
+            (available.width() - target_width) // 2,
+        )
+        y = available.y() + max(
+            0,
+            (available.height() - target_height) // 2,
+        )
+
+        self.setGeometry(
+            x,
+            y,
+            target_width,
+            target_height,
+        )
+
+        self.setMinimumSize(
+            min(900, target_width),
+            min(620, target_height),
+        )
+
+    def showEvent(self, event):
+        super().showEvent(event)
+
+        if not self._geometry_applied:
+            self._fit_to_available_screen()
+            self._geometry_applied = True
 
     def prepare_context(self):
         if self.worker and self.worker.isRunning():
