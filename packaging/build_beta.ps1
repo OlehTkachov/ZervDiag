@@ -55,12 +55,23 @@ Copy-Item `
     -Force
 
 $programFilesX86 = ${env:ProgramFiles(x86)}
-$innoCandidates = @(
-    $(if ($programFilesX86) { Join-Path $programFilesX86 "Inno Setup 6\ISCC.exe" }),
-    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe" })
-) | Where-Object { $_ -and (Test-Path $_) }
+$innoCandidates = @()
 
-if (-not $innoCandidates) {
+if ($programFilesX86) {
+    $candidate = Join-Path $programFilesX86 "Inno Setup 6\ISCC.exe"
+    if (Test-Path $candidate) {
+        $innoCandidates += $candidate
+    }
+}
+
+if ($env:ProgramFiles) {
+    $candidate = Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"
+    if (Test-Path $candidate) {
+        $innoCandidates += $candidate
+    }
+}
+
+if ($innoCandidates.Count -eq 0) {
     Write-Host "`n[3/3] Inno Setup not found."
     Write-Host "Application files are ready here:"
     Write-Host "  $repo\dist\ZervDiag"
