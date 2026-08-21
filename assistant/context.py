@@ -71,6 +71,13 @@ def _text_is_usable(text):
     return True
 
 
+def _context_fingerprint(text):
+    """Stable-enough normalized key for duplicate excerpts in one request."""
+    text = (text or "").casefold()
+    text = re.sub(r"\s+", " ", text).strip(" .…\t\r\n")
+    return text
+
+
 def _extract_context_chunk(
     text,
     requirements,
@@ -145,7 +152,8 @@ def retrieve_local_context(
     - наружу ничего не отправляется;
     - разговорный вопрос сначала проходит консервативный query planner;
     - search_query можно передать явно, если нужен точный контроль;
-    - повреждённый после старого декодирования текст не передаётся модели.
+    - повреждённый после старого декодирования текст не передаётся модели;
+    - одинаковые фрагменты-клоны передаются модели только один раз.
     """
     question = (question or "").strip()
 
@@ -165,7 +173,7 @@ def retrieve_local_context(
         return []
 
     # Берём кандидатов с запасом: часть старых .DOC может содержать уже
-    # необратимо испорченный текст и будет отфильтрована ниже.
+    # необратимо испорченный текст, а часть результатов может быть клонами.
     candidate_limit = max(
         max_documents,
         max_documents * 4,
@@ -218,6 +226,7 @@ def retrieve_local_context(
 
     sources = []
     used_chars = 0
+    seen_contexts = set()
 
     for result in results:
         if len(sources) >= max_documents:
@@ -261,6 +270,12 @@ def retrieve_local_context(
 
         if not context or not _text_is_usable(context):
             continue
+
+        fingerprint = _context_fingerprint(context)
+        if not fingerprint or fingerprint in seen_contexts:
+            continue
+
+        seen_contexts.add(fingerprint)
 
         sources.append(
             AssistantSource(
