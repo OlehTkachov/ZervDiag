@@ -22,6 +22,7 @@ def main():
     from ui.auto_indexing import install_auto_index_settings
     from ui.localization import install_localization
     from scheduler.windows_task import install_windows_scheduler
+    from ui.assistant_integration import install_ai_assistant
 
     window = MainWindow()
     install_database_status(window)
@@ -30,6 +31,7 @@ def main():
     install_auto_index_settings(window)
     install_localization(window)
     install_windows_scheduler(window)
+    install_ai_assistant(window)
     install_runtime_event_logging(window)
 
     # Запускаем развёрнутым окном: весь рабочий экран,
