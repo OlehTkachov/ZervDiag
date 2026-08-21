@@ -22,6 +22,14 @@ PROGRAMMATIC_EXTENSIONS = {
     ".p160",
 }
 
+# Служебные файлы Windows не являются частью технической библиотеки.
+# Они остаются в основной базе ZervDiag, но Auditor их полностью
+# игнорирует: не показывает, не оценивает и не включает в статистику.
+SYSTEM_IGNORED_NAMES = {
+    "desktop.ini",
+    "thumbs.db",
+}
+
 MEDIA_OR_BINARY_EXTENSIONS = {
     ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".mp3", ".wav",
     ".exe", ".msi", ".dll", ".iso",
@@ -220,6 +228,9 @@ def load_audit_records():
             content_sample,
             content_chars,
         ) = row
+
+        if (filename or "").strip().casefold() in SYSTEM_IGNORED_NAMES:
+            continue
 
         score, category, reasons, _sample_chars = _score_row(
             filename,
