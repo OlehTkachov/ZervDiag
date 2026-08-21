@@ -10,6 +10,14 @@ on:
       - "requirements*.txt"
       - "packaging/**"
       - ".github/workflows/build-beta.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "**/*.py"
+      - "requirements*.txt"
+      - "packaging/**"
+      - ".github/workflows/build-beta.yml"
 
 jobs:
   build-windows-beta:
