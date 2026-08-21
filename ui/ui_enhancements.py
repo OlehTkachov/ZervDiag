@@ -72,7 +72,7 @@ def install_ui_enhancements(main_window):
         language = get_language(self.settings)
 
         if not query:
-            original_perform_search()
+            self.status.setText(tr("search.enter_query", language))
             return
 
         if (
@@ -95,6 +95,9 @@ def install_ui_enhancements(main_window):
         self._v14_queued_query = None
 
         original_perform_search()
+        self.status.setText(
+            tr("search.running", language, query=query)
+        )
 
     def _start_queued_search(self, query):
         query = (query or "").strip()
@@ -132,11 +135,31 @@ def install_ui_enhancements(main_window):
             return
 
         self._v14_active_query = ""
+        language = get_language(self.settings)
 
         if results:
+            cloud_count = sum(1 for result in results if result.is_cloud)
+
+            for row, result in enumerate(results):
+                item = self.results.item(row, 2)
+                if item is not None:
+                    item.setText(
+                        tr(
+                            "storage.cloud" if result.is_cloud else "storage.local",
+                            language,
+                        )
+                    )
+
+            self.status.setText(
+                tr(
+                    "search.found",
+                    language,
+                    count=len(results),
+                    cloud=cloud_count,
+                )
+            )
             return
 
-        language = get_language(self.settings)
         self.status.setText(
             tr("search.not_found_text", language, query=query)
         )
@@ -169,6 +192,9 @@ def install_ui_enhancements(main_window):
         self._v14_active_query = ""
 
         original_search_error(message)
+        self.status.setText(
+            tr("search.error", get_language(self.settings), message=message)
+        )
 
         if queued_query:
             _start_queued_search(
