@@ -3,26 +3,26 @@ from PySide6.QtWidgets import QPushButton
 from assistant.provider_config import PROVIDER_OLLAMA, PROVIDER_OPENAI
 from assistant.providers import get_selected_provider_status
 from i18n.settings import get_language
-from ui.assistant_dialog import AssistantDialog
+from ui.live_assistant_dialog import LiveAssistantDialog
 
 
 PROVIDER_TEXT = {
     "ru": {
-        "ollama_ready": "Провайдер: локальная модель (Ollama). Модель: {model}. Сервер: {endpoint}. Сетевой адаптер будет подключён следующим этапом.",
+        "ollama_ready": "Провайдер: локальная модель (Ollama). Модель: {model}. Сервер: {endpoint}. Grounded-ответы включены.",
         "ollama_missing": "Провайдер: локальная модель (Ollama). Укажите адрес сервера и имя модели в Настройках.",
-        "openai_ready": "Провайдер: OpenAI API. Модель: {model}. API-ключ сохранён и зашифрован Windows DPAPI. Сетевой адаптер будет подключён следующим этапом.",
+        "openai_ready": "Провайдер: OpenAI API. Модель: {model}. API-ключ сохранён и зашифрован Windows DPAPI. Сетевой адаптер пока не включён.",
         "openai_missing": "Провайдер: OpenAI API. Укажите модель и сохраните API-ключ в Настройках.",
     },
     "uk": {
-        "ollama_ready": "Провайдер: локальна модель (Ollama). Модель: {model}. Сервер: {endpoint}. Мережевий адаптер буде підключено наступним етапом.",
+        "ollama_ready": "Провайдер: локальна модель (Ollama). Модель: {model}. Сервер: {endpoint}. Grounded-відповіді увімкнено.",
         "ollama_missing": "Провайдер: локальна модель (Ollama). Вкажіть адресу сервера та назву моделі в Налаштуваннях.",
-        "openai_ready": "Провайдер: OpenAI API. Модель: {model}. API-ключ збережено та зашифровано Windows DPAPI. Мережевий адаптер буде підключено наступним етапом.",
+        "openai_ready": "Провайдер: OpenAI API. Модель: {model}. API-ключ збережено та зашифровано Windows DPAPI. Мережевий адаптер поки не увімкнено.",
         "openai_missing": "Провайдер: OpenAI API. Вкажіть модель і збережіть API-ключ у Налаштуваннях.",
     },
     "en": {
-        "ollama_ready": "Provider: local model (Ollama). Model: {model}. Server: {endpoint}. The network adapter will be connected in the next stage.",
+        "ollama_ready": "Provider: local model (Ollama). Model: {model}. Server: {endpoint}. Grounded answers are enabled.",
         "ollama_missing": "Provider: local model (Ollama). Set the server address and model name in Settings.",
-        "openai_ready": "Provider: OpenAI API. Model: {model}. The API key is stored and encrypted with Windows DPAPI. The network adapter will be connected in the next stage.",
+        "openai_ready": "Provider: OpenAI API. Model: {model}. The API key is stored and encrypted with Windows DPAPI. The network adapter is not enabled yet.",
         "openai_missing": "Provider: OpenAI API. Set a model and save an API key in Settings.",
     },
 }
@@ -64,7 +64,7 @@ def install_ai_assistant(main_window):
 
     button = QPushButton("ZervDiag AI")
     button.setToolTip(
-        "Grounded AI: first retrieve local SQLite sources, then ask a model."
+        "Grounded AI: first retrieve local SQLite sources, then ask the selected model."
     )
     main_window.btn_ai_assistant = button
 
@@ -73,7 +73,7 @@ def install_ai_assistant(main_window):
     left_layout.insertWidget(insert_index, button)
 
     def open_assistant():
-        dialog = AssistantDialog(main_window)
+        dialog = LiveAssistantDialog(main_window)
         dialog.model_label.setText(_provider_status_text(main_window.settings))
         dialog.exec()
 
