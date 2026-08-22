@@ -122,6 +122,8 @@ class LiveAssistantDialog(AssistantDialog):
             f"{self._grounded_context_preview}"
         )
         self.preview.setPlainText(combined)
+        scrollbar = self.preview.verticalScrollBar()
+        scrollbar.setValue(scrollbar.minimum())
         self.copy_button.setEnabled(True)
         self.prepare_button.setEnabled(True)
         self.close_button.setEnabled(True)
