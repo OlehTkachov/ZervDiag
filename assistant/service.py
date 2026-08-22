@@ -16,11 +16,11 @@ class AssistantPreparation:
 def prepare_assistant_request(
     question,
     *,
-    max_documents=8,
-    chunk_chars=3200,
-    max_total_chars=24000,
+    max_documents=4,
+    chunk_chars=1800,
+    max_total_chars=6500,
 ):
-    """Prepare a grounded assistant request using SQLite-only retrieval."""
+    """Prepare a compact grounded request using SQLite-only retrieval."""
     question = (question or "").strip()
 
     plan = plan_search_query(question)
