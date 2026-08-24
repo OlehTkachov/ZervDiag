@@ -1,2 +1,2 @@
-APP_VERSION = "0.15.0-beta.1"
+APP_VERSION = "0.15.0-beta.2"
 APP_DISPLAY_NAME = f"ZervDiag Beta {APP_VERSION}"
