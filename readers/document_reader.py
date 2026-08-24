@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 
 import pymupdf
 from docx import Document
@@ -9,6 +10,7 @@ from openpyxl import load_workbook
 
 
 MIN_PDF_TEXT_CHARS = 80
+MAX_CONTROL_NOISE_RATIO = 0.02
 
 OCR_IMAGE_EXTENSIONS = {
     ".jpg",
@@ -36,6 +38,68 @@ class OCRRequired(Exception):
         self.preview = (
             preview or ""
         )
+
+
+def _is_disallowed_control(character):
+    if character in {
+        "\t",
+        "\n",
+        "\r",
+    }:
+        return False
+
+    return (
+        unicodedata.category(
+            character
+        ) == "Cc"
+    )
+
+
+def _control_noise_ratio(text):
+    text = text or ""
+
+    if not text:
+        return 0.0
+
+    bad = sum(
+        1
+        for character in text
+        if _is_disallowed_control(
+            character
+        )
+    )
+
+    return (
+        bad
+        / max(1, len(text))
+    )
+
+
+def _looks_binary_like(text):
+    return (
+        _control_noise_ratio(text)
+        > MAX_CONTROL_NOISE_RATIO
+    )
+
+
+def clean_extracted_text(text):
+    """
+    SQLite length(TEXT) effectively stops at embedded NUL characters,
+    while Python len() counts them. Persisting such strings can therefore
+    create a false `ok -> pending -> ok` cycle.
+
+    Keep normal whitespace, remove embedded control characters, and leave
+    printable Unicode untouched.
+    """
+    text = text or ""
+
+    return "".join(
+        character
+        for character in text
+        if not _is_disallowed_control(
+            character
+        )
+    )
 
 
 def read_pdf_text(
@@ -73,6 +137,21 @@ def read_pdf_text(
 
     finally:
         doc.close()
+
+    # Some PDFs expose a nominal "text layer" that is really binary/font
+    # garbage. Do not index thousands of control bytes as valid text.
+    # Such PDFs are better handled by the OCR queue.
+    if _looks_binary_like(
+        result
+    ):
+        raise OCRRequired(
+            total_pages=total_pages,
+            preview="",
+        )
+
+    result = clean_extracted_text(
+        result
+    )
 
     if (
         len(
@@ -388,8 +467,22 @@ def read_text(
         "latin-1",
     ):
         try:
-            return path.read_text(
+            text = path.read_text(
                 encoding=encoding
+            )
+
+            if _looks_binary_like(
+                text
+            ):
+                print(
+                    f"TEXT_BINARY_LIKE: "
+                    f"{filepath}",
+                    flush=True,
+                )
+                return ""
+
+            return clean_extracted_text(
+                text
             )
 
         except UnicodeDecodeError:
@@ -428,48 +521,53 @@ def read_document(
         )
 
     if extension == ".docx":
-        return read_docx(
+        result = read_docx(
             filepath
         )
 
-    if extension == ".doc":
-        return read_doc(
+    elif extension == ".doc":
+        result = read_doc(
             filepath
         )
 
-    if extension == ".xlsx":
-        return read_xlsx(
+    elif extension == ".xlsx":
+        result = read_xlsx(
             filepath
         )
 
-    if extension == ".xls":
-        return read_xls(
+    elif extension == ".xls":
+        result = read_xls(
             filepath
         )
 
-    if extension == ".odt":
-        return read_odt(
+    elif extension == ".odt":
+        result = read_odt(
             filepath
         )
 
-    if extension == ".ods":
-        return read_ods(
+    elif extension == ".ods":
+        result = read_ods(
             filepath
         )
 
-    if extension in {
+    elif extension in {
         ".txt",
         ".csv",
         ".json",
     }:
-        return read_text(
+        result = read_text(
             filepath
         )
 
-    if extension in OCR_IMAGE_EXTENSIONS:
+    elif extension in OCR_IMAGE_EXTENSIONS:
         raise OCRRequired(
             total_pages=0,
             preview="",
         )
 
-    return ""
+    else:
+        result = ""
+
+    return clean_extracted_text(
+        result
+    )
