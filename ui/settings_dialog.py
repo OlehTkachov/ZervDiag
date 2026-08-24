@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QTime
+from PySide6.QtCore import Qt, QTime
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -231,7 +231,7 @@ class SettingsDialog(QDialog):
         database_path.setWordWrap(True)
         database_path.setTextInteractionFlags(
             database_path.textInteractionFlags()
-            | database_path.TextSelectableByMouse
+            | Qt.TextInteractionFlag.TextSelectableByMouse
         )
         database_layout.addWidget(database_path)
 
