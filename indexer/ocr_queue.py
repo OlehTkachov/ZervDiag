@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from database.db import (
     create_database,
@@ -93,6 +94,56 @@ def _set_status(
                     if error
                     else None
                 ),
+                file_id,
+            ),
+        )
+
+        conn.commit()
+
+    finally:
+        conn.close()
+
+
+def _refresh_file_metadata(
+    file_id,
+    filepath,
+):
+    """
+    OCR может hydrate/dehydrate OneDrive placeholder.
+    После release OneDrive/Cloud Files может изменить metadata файла,
+    поэтому сохраняем фактические size/modified уже после release.
+
+    Иначе следующая обычная индексация может принять собственный
+    hydrate/dehydrate за изменение документа и снова поставить его в OCR.
+    """
+
+    try:
+        stat = Path(
+            filepath
+        ).stat()
+
+    except OSError as error:
+        print(
+            f"OCR METADATA REFRESH WARNING: "
+            f"{filepath}: {error}",
+            flush=True,
+        )
+        return
+
+    conn = get_connection()
+
+    try:
+        conn.execute(
+            """
+            UPDATE files
+            SET
+                size = ?,
+                modified = ?
+            WHERE id = ?
+            """,
+            (
+                int(stat.st_size),
+                float(stat.st_mtime),
                 file_id,
             ),
         )
@@ -440,6 +491,11 @@ def process_ocr_file(
                     f"{filepath}: {error}",
                     flush=True,
                 )
+
+            _refresh_file_metadata(
+                file_id,
+                filepath,
+            )
 
 
 def process_ocr_queue(
