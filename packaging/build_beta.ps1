@@ -13,6 +13,12 @@ Write-Host "Repository: $repo"
 & $Python -m pip install -r requirements.txt
 & $Python -m pip install -r requirements-build.txt
 
+Write-Host "`n[smoke] Database transfer and settings UI..."
+& $Python ".\packaging\smoke_beta.py"
+if ($LASTEXITCODE -ne 0) {
+    throw "Beta database/settings smoke test failed"
+}
+
 foreach ($path in @("build", "build-scheduled", "dist")) {
     if (Test-Path $path) {
         Remove-Item $path -Recurse -Force
