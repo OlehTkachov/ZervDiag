@@ -1,5 +1,4 @@
 import time
-from pathlib import Path
 
 from database.db import (
     create_database,
@@ -104,56 +103,6 @@ def _set_status(
         conn.close()
 
 
-def _refresh_file_metadata(
-    file_id,
-    filepath,
-):
-    """
-    OCR может hydrate/dehydrate OneDrive placeholder.
-    После release OneDrive/Cloud Files может изменить metadata файла,
-    поэтому сохраняем фактические size/modified уже после release.
-
-    Иначе следующая обычная индексация может принять собственный
-    hydrate/dehydrate за изменение документа и снова поставить его в OCR.
-    """
-
-    try:
-        stat = Path(
-            filepath
-        ).stat()
-
-    except OSError as error:
-        print(
-            f"OCR METADATA REFRESH WARNING: "
-            f"{filepath}: {error}",
-            flush=True,
-        )
-        return
-
-    conn = get_connection()
-
-    try:
-        conn.execute(
-            """
-            UPDATE files
-            SET
-                size = ?,
-                modified = ?
-            WHERE id = ?
-            """,
-            (
-                int(stat.st_size),
-                float(stat.st_mtime),
-                file_id,
-            ),
-        )
-
-        conn.commit()
-
-    finally:
-        conn.close()
-
-
 def _remember_total_pages(
     file_id,
     total_pages,
@@ -237,46 +186,47 @@ def _save_page(
 def _finish_file(
     file_id,
 ):
+    """
+    Завершает OCR тем же критерием полезного текста,
+    который использует обычная индексация: Python str.strip().
+
+    SQLite trim() без явного набора символов не удаляет все
+    переводы строк/табуляции, поэтому раньше OCR мог пометить как
+    ok строку из служебного whitespace, а следующий индекс снова
+    отправлял тот же файл в OCR.
+    """
+
     conn = get_connection()
 
     try:
         row = conn.execute(
             """
-            SELECT
-                length(
-                    trim(
-                        COALESCE(
-                            content,
-                            ''
-                        )
-                    )
-                )
+            SELECT content
             FROM files
             WHERE id = ?
             """,
             (file_id,),
         ).fetchone()
 
-        chars = (
-            int(
-                row[0] or 0
-            )
-            if row
-            else 0
+        content = (
+            row[0]
+            if row and row[0]
+            else ""
         )
 
-        if (
-            chars
-            >= MIN_CONTENT_CHARS
-        ):
+        chars = len(
+            content.strip()
+        )
+
+        if chars >= MIN_CONTENT_CHARS:
             status = "ok"
             error = None
 
         else:
             status = "error"
             error = (
-                "OCR не извлёк "
-                "достаточно текста"
+                "OCR не извлёк достаточно текста: "
+                f"{chars} символов"
             )
 
         conn.execute(
@@ -491,11 +441,6 @@ def process_ocr_file(
                     f"{filepath}: {error}",
                     flush=True,
                 )
-
-            _refresh_file_metadata(
-                file_id,
-                filepath,
-            )
 
 
 def process_ocr_queue(
