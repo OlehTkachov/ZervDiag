@@ -126,6 +126,19 @@ def create_database():
             """
         )
 
+        # Если программа была аварийно закрыта во время обычной
+        # индексации, transient status=processing не должен оставаться
+        # навсегда. При следующем запуске файл снова доступен обработке.
+        conn.execute(
+            """
+            UPDATE files
+            SET
+                extraction_status = 'pending',
+                extraction_error = NULL
+            WHERE extraction_status = 'processing'
+            """
+        )
+
         # Если программа была закрыта во время OCR,
         # при следующем запуске файл снова доступен очереди.
         conn.execute(
