@@ -1,5 +1,5 @@
 #define MyAppName "ZervDiag Beta"
-#define MyAppVersion "0.15.0-beta.1"
+#define MyAppVersion "0.15.0-beta.2"
 #define MyAppPublisher "ZervDiag"
 #define MyAppExeName "ZervDiag.exe"
 
