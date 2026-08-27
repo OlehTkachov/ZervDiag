@@ -9,31 +9,31 @@ from ui.about_dialog import AboutDialog
 
 COMMERCIAL_STYLE = r"""
 QMainWindow, QDialog {
-    background: #F4F6F8;
-    color: #17202A;
+    background: #0B1F33;
+    color: #E6ECF2;
 }
 
 QWidget {
     font-family: "Segoe UI";
     font-size: 10pt;
-    color: #17202A;
+    color: #E6ECF2;
 }
 
 QLabel#brandTitle {
-    color: #111923;
-    font-size: 27px;
+    color: #E6ECF2;
+    font-size: 29px;
     font-weight: 700;
     padding: 2px 6px 0 6px;
 }
 
 QLabel#brandTagline {
-    color: #66717D;
+    color: #9FB5C7;
     font-size: 9pt;
     padding: 0 6px 2px 6px;
 }
 
 QLabel#brandVersion {
-    color: #A66000;
+    color: #00BCD4;
     font-size: 8pt;
     font-weight: 700;
     padding: 0 6px 14px 6px;
@@ -41,153 +41,184 @@ QLabel#brandVersion {
 
 QPushButton {
     min-height: 34px;
-    border: 1px solid #CBD2D9;
+    border: 1px solid #29465E;
     border-radius: 7px;
     padding: 5px 12px;
-    background: #FFFFFF;
-    color: #202A34;
+    background: #102A41;
+    color: #E6ECF2;
     font-weight: 600;
 }
 
 QPushButton:hover {
-    border-color: #9BA7B3;
-    background: #F8FAFB;
+    border-color: #3B6886;
+    background: #173A5C;
 }
 
 QPushButton:pressed {
-    background: #E9EDF1;
+    background: #0E2438;
 }
 
 QPushButton:disabled {
-    color: #9AA4AE;
-    background: #EEF1F4;
-    border-color: #D8DDE2;
+    color: #667B8D;
+    background: #0D2337;
+    border-color: #203A50;
 }
 
 QPushButton[role="nav"] {
-    min-width: 174px;
-    min-height: 38px;
+    min-width: 184px;
+    min-height: 40px;
     text-align: left;
     padding-left: 14px;
-    border-color: #2B3743;
-    background: #17212B;
-    color: #F2F5F7;
+    border-color: transparent;
+    background: transparent;
+    color: #DCE6EE;
 }
 
 QPushButton[role="nav"]:hover {
-    background: #22303D;
-    border-color: #3B4C5C;
+    background: #12314B;
+    border-color: #1B4B68;
+    color: #FFFFFF;
 }
 
 QPushButton[role="nav"]:pressed {
-    background: #101820;
+    background: #173A5C;
+    border-color: #00BCD4;
 }
 
 QPushButton[role="nav"]:disabled {
-    color: #7E8994;
-    background: #1B2530;
-    border-color: #25313C;
+    color: #5F7486;
+    background: transparent;
+    border-color: transparent;
 }
 
 QPushButton[role="about"] {
-    min-width: 174px;
+    min-width: 184px;
     text-align: left;
     padding-left: 14px;
-    color: #69747F;
+    color: #8299AA;
     background: transparent;
     border-color: transparent;
 }
 
 QPushButton[role="about"]:hover {
-    color: #202A34;
-    background: #E8EDF1;
+    color: #DDE9F1;
+    background: #102B43;
 }
 
 QPushButton[role="primary"] {
-    min-width: 104px;
+    min-width: 110px;
     min-height: 40px;
-    background: #F59E0B;
-    border-color: #D88905;
-    color: #111923;
+    background: #00BCD4;
+    border-color: #21CBE1;
+    color: #071A28;
     font-weight: 700;
 }
 
 QPushButton[role="primary"]:hover {
-    background: #FFAA18;
-    border-color: #C97D04;
+    background: #21CBE1;
+    border-color: #55D9EA;
+}
+
+QPushButton[role="primary"]:pressed {
+    background: #00A8BE;
+    border-color: #00A8BE;
 }
 
 QLineEdit {
     min-height: 40px;
-    border: 1px solid #C7CED5;
+    border: 1px solid #29465E;
     border-radius: 8px;
     padding: 0 12px;
-    background: #FFFFFF;
-    selection-background-color: #F59E0B;
-    selection-color: #111923;
+    background: #0F2A41;
+    color: #E6ECF2;
+    selection-background-color: #00BCD4;
+    selection-color: #071A28;
 }
 
 QLineEdit:focus {
-    border: 2px solid #F0A020;
+    border: 2px solid #00BCD4;
     padding: 0 11px;
 }
 
+QLineEdit::placeholder {
+    color: #71899B;
+}
+
 QTableWidget {
-    background: #FFFFFF;
-    alternate-background-color: #F7F9FA;
-    border: 1px solid #D8DEE4;
+    background: #0E263B;
+    alternate-background-color: #102B43;
+    border: 1px solid #24445B;
     border-radius: 8px;
-    gridline-color: #E5E9ED;
-    selection-background-color: #FFF1D6;
-    selection-color: #17202A;
+    gridline-color: #1A384E;
+    selection-background-color: #173A5C;
+    selection-color: #FFFFFF;
+}
+
+QTableWidget::item {
+    padding: 3px 6px;
+}
+
+QTableWidget::item:selected {
+    border-left: 2px solid #00BCD4;
 }
 
 QHeaderView::section {
-    background: #E9EDF1;
-    color: #26323D;
+    background: #132F48;
+    color: #BFD0DC;
     border: none;
-    border-right: 1px solid #D1D7DD;
-    border-bottom: 1px solid #CBD2D9;
+    border-right: 1px solid #203E55;
+    border-bottom: 1px solid #29465E;
     padding: 8px 9px;
     font-weight: 700;
 }
 
 QLabel#documentationPath {
-    background: #FFFFFF;
-    border: 1px solid #D8DEE4;
+    background: #0F2A41;
+    border: 1px solid #24445B;
     border-radius: 7px;
     padding: 8px 10px;
-    color: #45515D;
+    color: #AFC1CE;
 }
 
 QLabel#statusLabel {
-    background: #E9EDF1;
+    background: #102B43;
+    border: 1px solid #1D3C53;
     border-radius: 7px;
     padding: 8px 10px;
-    color: #44515D;
+    color: #AFC1CE;
 }
 
 QGroupBox {
     font-weight: 700;
-    border: 1px solid #D5DBE1;
+    border: 1px solid #24445B;
     border-radius: 8px;
     margin-top: 12px;
     padding-top: 12px;
-    background: #FAFBFC;
+    background: #0E263B;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 5px;
+    color: #BFD0DC;
 }
 
 QComboBox, QSpinBox, QTimeEdit {
     min-height: 30px;
-    border: 1px solid #C7CED5;
+    border: 1px solid #29465E;
     border-radius: 6px;
-    background: #FFFFFF;
+    background: #0F2A41;
+    color: #E6ECF2;
     padding: 2px 7px;
+}
+
+QComboBox QAbstractItemView {
+    background: #102A41;
+    color: #E6ECF2;
+    border: 1px solid #29465E;
+    selection-background-color: #173A5C;
+    selection-color: #FFFFFF;
 }
 
 QCheckBox {
@@ -195,49 +226,82 @@ QCheckBox {
 }
 
 QToolTip {
-    background: #111923;
-    color: #F5F7F9;
-    border: 1px solid #344454;
+    background: #071A28;
+    color: #E6ECF2;
+    border: 1px solid #2A526C;
     padding: 5px 7px;
 }
 
+QScrollBar:vertical {
+    background: #0B1F33;
+    width: 12px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #31556E;
+    min-height: 28px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #3F6A87;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar:horizontal {
+    background: #0B1F33;
+    height: 12px;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: #31556E;
+    min-width: 28px;
+    border-radius: 6px;
+}
+
 QDialog#aboutDialog {
-    background: #F7F8FA;
+    background: #0B1F33;
 }
 
 QLabel#aboutProduct {
     font-size: 30px;
     font-weight: 700;
-    color: #111923;
+    color: #F4F8FB;
 }
 
 QLabel#aboutTagline {
-    color: #A66000;
+    color: #00BCD4;
     font-size: 11pt;
     font-weight: 700;
 }
 
 QLabel#aboutEdition {
-    color: #65717D;
+    color: #8EA6B7;
 }
 
 QLabel#aboutBody {
-    background: #FFFFFF;
-    border: 1px solid #DCE1E6;
+    background: #0E263B;
+    border: 1px solid #24445B;
     border-radius: 8px;
     padding: 12px;
+    color: #D5E0E8;
 }
 
 QLabel#aboutNote {
-    background: #FFF4DD;
-    border: 1px solid #F1D29A;
+    background: #102E47;
+    border: 1px solid #1D5873;
     border-radius: 8px;
     padding: 10px 12px;
-    color: #5C430F;
+    color: #AFDCE5;
 }
 
 QLabel#aboutDetails, QLabel#aboutCopyright {
-    color: #66717D;
+    color: #8EA6B7;
 }
 """
 
@@ -247,7 +311,7 @@ def _pointing_cursor(widget):
 
 
 def install_branding(main_window):
-    """Apply the commercial visual layer without changing application logic."""
+    """Apply the approved ZervDiag visual layer without changing app logic."""
     if getattr(main_window, "_commercial_branding_installed", False):
         return
 
@@ -292,7 +356,8 @@ def install_branding(main_window):
         title = title_item.widget() if title_item else None
         if isinstance(title, QLabel):
             title.setObjectName("brandTitle")
-            title.setText("ZervDiag")
+            title.setText('Zerv<span style="color:#00BCD4">Diag</span>')
+            title.setTextFormat(Qt.RichText)
             title.setStyleSheet("")
 
             tagline = QLabel(PRODUCT_TAGLINE)
