@@ -18,6 +18,9 @@ from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from database.transfer import quick_check  # noqa: E402
+from ui.about_dialog import AboutDialog  # noqa: E402
+from ui.branding import install_branding  # noqa: E402
+from ui.main_window import MainWindow  # noqa: E402
 from ui.settings_dialog import SettingsDialog  # noqa: E402
 
 
@@ -79,9 +82,41 @@ def main():
 
         dialog.close()
 
+        about = AboutDialog(settings)
+        if "ZervDiag" not in about.windowTitle():
+            raise RuntimeError(
+                "About dialog branding is missing"
+            )
+        about.close()
+
+        main_window = MainWindow()
+        install_branding(main_window)
+
+        if not hasattr(main_window, "btn_about"):
+            raise RuntimeError(
+                "Commercial About button is missing"
+            )
+
+        if main_window.btn_about.property("role") != "about":
+            raise RuntimeError(
+                "About button branding role is missing"
+            )
+
+        if main_window.search_button.property("role") != "primary":
+            raise RuntimeError(
+                "Primary search action branding is missing"
+            )
+
+        if "#F59E0B" not in main_window.styleSheet():
+            raise RuntimeError(
+                "Commercial stylesheet was not applied"
+            )
+
+        main_window.close()
+
     app.processEvents()
     print(
-        "BETA DATABASE UI SMOKE: ok",
+        "BETA DATABASE + BRAND UI SMOKE: ok",
         flush=True,
     )
 
