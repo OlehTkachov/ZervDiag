@@ -10,6 +10,7 @@ data/
 
 build/
 build-scheduled/
+build-assets/
 dist/
 *.spec
 
