@@ -1,8 +1,9 @@
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from app_paths import is_frozen
+from app_paths import is_frozen, resource_path
 from app_version import APP_VERSION
 from beta_runtime import (
     configure_black_box_paths,
@@ -33,6 +34,15 @@ def main():
     from ui.branding import COMMERCIAL_STYLE
 
     app.setStyleSheet(COMMERCIAL_STYLE)
+
+    icon_path = resource_path("assets", "zervdiag.ico")
+    if not icon_path.exists():
+        icon_path = resource_path("assets", "zervdiag_mark.svg")
+
+    if icon_path.exists():
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            app.setWindowIcon(icon)
 
     # Импортируем остальную программу после установки аварийных hooks:
     # если ошибка случится уже на этапе загрузки UI-модулей, traceback
