@@ -45,6 +45,7 @@ def main():
     from scheduler import windows_task
     from ui.assistant_integration import install_ai_assistant
     from ui.component_status import install_beta_component_check
+    from ui.branding import install_branding
 
     configure_packaged_scheduler(windows_task)
 
@@ -61,6 +62,7 @@ def main():
     install_ai_assistant(window)
     install_runtime_event_logging(window)
     install_beta_component_check(window)
+    install_branding(window)
 
     # Запускаем развёрнутым окном: весь рабочий экран,
     # но с обычной рамкой Windows и панелью задач.
