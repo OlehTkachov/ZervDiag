@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QSettings
 
+from app_paths import SCHEDULED_LOG_PATH
 from database.db import create_database
 from indexer.indexer import index_folder
 from runtime_locks import (
@@ -22,8 +23,7 @@ from ui.auto_indexing import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
-LOG_PATH = BASE_DIR / "data" / "scheduled_index.log"
+LOG_PATH = SCHEDULED_LOG_PATH
 
 
 def _log(message):

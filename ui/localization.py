@@ -165,6 +165,13 @@ def install_localization(main_window):
 
         language = dialog.save()
 
+        # A database import from Settings is staged rather than swapping a
+        # live SQLite file. Save the other settings first, then close cleanly;
+        # ui.first_run applies the verified database on the next launch.
+        if dialog.restart_requested:
+            main_window.close()
+            return
+
         controller = getattr(
             main_window,
             "_v14_auto_index_controller",

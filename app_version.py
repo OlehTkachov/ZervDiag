@@ -1,0 +1,6 @@
+APP_VERSION = "0.15.0-beta.4"
+APP_DISPLAY_NAME = f"ZervDiag Beta {APP_VERSION}"
+PRODUCT_NAME = "ZervDiag"
+PRODUCT_TAGLINE = "Technical Documentation Intelligence"
+PRODUCT_EDITION = "Beta"
+COPYRIGHT = "© 2026 ZervDiag"

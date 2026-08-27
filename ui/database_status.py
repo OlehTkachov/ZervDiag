@@ -24,9 +24,9 @@ STATUS_NAMES = {
     "ocr_pending": "OCR ожидает",
     "ocr_processing": "OCR выполняется",
     "error": "Ошибка",
-    "pending": "Ожидает",
+    "pending": "Ожидает обработки",
     "processing": "Обрабатывается",
-    "unsupported": "Неподдерживаемый",
+    "unsupported": "Не поддерживается",
 }
 
 
@@ -54,8 +54,8 @@ class DatabaseStatusDialog(QDialog):
         self.filter_box.addItem("OK", "ok")
         self.filter_box.addItem("OCR очередь", "ocr")
         self.filter_box.addItem("Ошибки", "error")
-        self.filter_box.addItem("Pending", "pending")
-        self.filter_box.addItem("Unsupported", "unsupported")
+        self.filter_box.addItem("Ожидают обработки", "pending")
+        self.filter_box.addItem("Не поддерживаются", "unsupported")
         controls.addWidget(self.filter_box)
 
         self.btn_refresh = QPushButton("Обновить")
@@ -116,8 +116,8 @@ class DatabaseStatusDialog(QDialog):
                 f"OK: {stats['ok']:,}   |   "
                 f"OCR: {stats['ocr']:,}   |   "
                 f"Ошибки: {stats['error']:,}   |   "
-                f"Pending: {stats['pending']:,}   |   "
-                f"Unsupported: {stats['unsupported']:,}"
+                f"Ожидают обработки: {stats['pending']:,}   |   "
+                f"Не поддерживаются: {stats['unsupported']:,}"
             )
         except Exception as error:
             self.summary.setText(

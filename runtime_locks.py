@@ -1,11 +1,7 @@
 import os
 from pathlib import Path
 
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-WRITER_LOCK_PATH = DATA_DIR / ".zervdiag_writer.lock"
-GUI_LOCK_PATH = DATA_DIR / ".zervdiag_gui.lock"
+from app_paths import GUI_LOCK_PATH, WRITER_LOCK_PATH
 
 
 class FileProcessLock:
