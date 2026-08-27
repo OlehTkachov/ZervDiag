@@ -28,6 +28,12 @@ def main():
 
     install_black_box(app)
 
+    # Коммерческий визуальный слой применяется до первого диалога,
+    # чтобы выбор/импорт базы уже выглядел как часть ZervDiag.
+    from ui.branding import COMMERCIAL_STYLE
+
+    app.setStyleSheet(COMMERCIAL_STYLE)
+
     # Импортируем остальную программу после установки аварийных hooks:
     # если ошибка случится уже на этапе загрузки UI-модулей, traceback
     # всё равно попадёт в crash.log.
