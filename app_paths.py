@@ -11,6 +11,16 @@ def is_frozen():
     return bool(getattr(sys, "frozen", False))
 
 
+def resource_path(*parts):
+    """Return a bundled resource path in source and PyInstaller builds."""
+    if is_frozen():
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+    else:
+        base = SOURCE_ROOT
+
+    return base.joinpath(*parts)
+
+
 def _local_app_data_root():
     value = os.environ.get("LOCALAPPDATA", "").strip()
     if value:
@@ -56,4 +66,5 @@ __all__ = [
     "GUI_LOCK_PATH",
     "ensure_runtime_dirs",
     "is_frozen",
+    "resource_path",
 ]
