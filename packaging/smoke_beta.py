@@ -107,9 +107,10 @@ def main():
                 "Primary search action branding is missing"
             )
 
-        if "#F59E0B" not in main_window.styleSheet():
+        style = main_window.styleSheet()
+        if "#00BCD4" not in style or "#0B1F33" not in style:
             raise RuntimeError(
-                "Commercial stylesheet was not applied"
+                "Approved dark/cyan commercial stylesheet was not applied"
             )
 
         main_window.close()
