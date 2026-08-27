@@ -13,6 +13,17 @@ Write-Host "Repository: $repo"
 & $Python -m pip install -r requirements.txt
 & $Python -m pip install -r requirements-build.txt
 
+Write-Host "`n[brand] Generating multi-size Windows icon..."
+& $Python ".\packaging\generate_icon.py"
+if ($LASTEXITCODE -ne 0) {
+    throw "Brand icon generation failed"
+}
+
+$brandIcon = Join-Path $repo "build-assets\zervdiag.ico"
+if (-not (Test-Path $brandIcon)) {
+    throw "Brand icon was not created: $brandIcon"
+}
+
 Write-Host "`n[smoke] Database transfer and settings UI..."
 & $Python ".\packaging\smoke_beta.py"
 if ($LASTEXITCODE -ne 0) {
@@ -32,6 +43,10 @@ Write-Host "`n[1/3] Building ZervDiag.exe..."
     --windowed `
     --onedir `
     --name ZervDiag `
+    --icon "$brandIcon" `
+    --version-file ".\packaging\version_info_zervdiag.txt" `
+    --add-data "$brandIcon;assets" `
+    --add-data ".\assets\zervdiag_mark.svg;assets" `
     --distpath dist `
     --workpath build `
     main.py
@@ -47,6 +62,8 @@ Write-Host "`n[2/3] Building ZervDiagScheduledIndex.exe..."
     --noconsole `
     --onefile `
     --name ZervDiagScheduledIndex `
+    --icon "$brandIcon" `
+    --version-file ".\packaging\version_info_scheduler.txt" `
     --distpath dist `
     --workpath build-scheduled `
     run_scheduled_index.py
