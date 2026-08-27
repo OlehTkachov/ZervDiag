@@ -83,6 +83,12 @@ QPushButton[role="nav"]:pressed {
     background: #101820;
 }
 
+QPushButton[role="nav"]:disabled {
+    color: #7E8994;
+    background: #1B2530;
+    border-color: #25313C;
+}
+
 QPushButton[role="about"] {
     min-width: 174px;
     text-align: left;
@@ -188,6 +194,13 @@ QCheckBox {
     spacing: 7px;
 }
 
+QToolTip {
+    background: #111923;
+    color: #F5F7F9;
+    border: 1px solid #344454;
+    padding: 5px 7px;
+}
+
 QDialog#aboutDialog {
     background: #F7F8FA;
 }
@@ -239,12 +252,17 @@ def install_branding(main_window):
         return
 
     main_window._commercial_branding_installed = True
+    main_window.setWindowTitle(f"ZervDiag · {APP_VERSION}")
 
     app = QApplication.instance()
     if app is not None:
         app.setFont(QFont("Segoe UI", 10))
 
-    icon = QIcon(str(resource_path("assets", "zervdiag.ico")))
+    icon_path = resource_path("assets", "zervdiag.ico")
+    if not icon_path.exists():
+        icon_path = resource_path("assets", "zervdiag_mark.svg")
+
+    icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     if not icon.isNull():
         main_window.setWindowIcon(icon)
         if app is not None:
