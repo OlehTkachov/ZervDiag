@@ -162,10 +162,41 @@ Require((standardJchFrames[1].Timestamp - standardJchFrames[0].Timestamp).TotalM
 
 var explicitlyExtended = PcanTrcCodec.Parse(new[]
 {
+    ";$FILEVERSION=1.1",
     "1) 0.000 Rx 00000123x 1 AA"
 }).Single();
 Require(explicitlyExtended.Id == 0x123 && explicitlyExtended.IsExtended,
     "An explicitly extended 29-bit PCAN ID with a low numeric value was not preserved.");
+
+var version10Frame = PcanTrcCodec.Parse(new[]
+{
+    "1) 0.000 018F 1 08"
+}).Single();
+var version12Frame = PcanTrcCodec.Parse(new[]
+{
+    ";$FILEVERSION=1.2",
+    "1) 1.000 1 Rx 018F 1 09"
+}, defaultChannel: 4).Single();
+var version13Frame = PcanTrcCodec.Parse(new[]
+{
+    ";$FILEVERSION=1.3",
+    "1) 2.000 1 Rx 018F - 1 0A"
+}, defaultChannel: 4).Single();
+var version30Frames = PcanTrcCodec.Parse(new[]
+{
+    ";$FILEVERSION=3.0",
+    ";$COLUMNS=N,O,T,B,I,d,R,l,D",
+    "1 3.000 DT 1 18F Rx - 1 0B",
+    "2 4.000 DT 1 0CFF5321 Rx - 1 0C"
+}, defaultChannel: 4);
+Require(!version10Frame.IsExtended && version10Frame.Id == 0x18F && version10Frame.Data[0] == 0x08,
+    "PCAN TRC 1.0 layout was not parsed correctly.");
+Require(version12Frame.Channel == 4 && version12Frame.Data[0] == 0x09 &&
+        version13Frame.Channel == 4 && version13Frame.Data[0] == 0x0A,
+    "PCAN TRC 1.2/1.3 bus, reserved field or DATA layout was not parsed correctly.");
+Require(version30Frames.Count == 2 && !version30Frames[0].IsExtended &&
+        version30Frames[1].IsExtended && version30Frames[1].Id == 0x0CFF5321,
+    "PCAN TRC 3.0 Standard/Extended layout was not parsed correctly.");
 
 var jchExperiment = await GenericTraceExperiment.CompareWindowsAsync(
     fixturePath,

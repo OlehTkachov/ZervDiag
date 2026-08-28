@@ -16,13 +16,18 @@ public sealed record PcanTrcImportResult(
 }
 
 /// <summary>
-/// Tolerant, order-preserving reader for PCAN-View Classical CAN trace files.
-/// PCAN trace headers, comments, RTR frames, error/status records and unknown
-/// lines are counted and skipped without terminating the import.
+/// Streaming, order-preserving reader for PEAK-System PCAN-View text traces.
+/// The parser follows the published layouts for TRC versions 1.0 through 3.0.
+/// Only physical Classical CAN data frames are imported into <see cref="CanFrame"/>;
+/// RTR, error/status, CAN FD/CAN XL and unknown records are counted and skipped.
 /// </summary>
 public static class PcanTrcCodec
 {
     public const int DefaultMaximumFrameCount = 1_000_000;
+
+    private static readonly Version Version10 = new(1, 0);
+    private static readonly Version Version13 = new(1, 3);
+    private static readonly Version Version30 = new(3, 0);
 
     public static async Task<IReadOnlyList<CanFrame>> LoadAsync(
         string path,
@@ -36,8 +41,7 @@ public static class PcanTrcCodec
         CancellationToken cancellationToken = default,
         int maximumFrameCount = DefaultMaximumFrameCount)
     {
-        ValidateChannel(defaultChannel);
-        ValidateMaximumFrameCount(maximumFrameCount);
+        ValidateArguments(defaultChannel, maximumFrameCount);
         if (string.IsNullOrWhiteSpace(path))
         {
             throw new ArgumentException("Путь к TRC-файлу не задан.", nameof(path));
@@ -74,8 +78,7 @@ public static class PcanTrcCodec
         int maximumFrameCount = DefaultMaximumFrameCount)
     {
         ArgumentNullException.ThrowIfNull(lines);
-        ValidateChannel(defaultChannel);
-        ValidateMaximumFrameCount(maximumFrameCount);
+        ValidateArguments(defaultChannel, maximumFrameCount);
         var parser = new ParserState(defaultChannel, maximumFrameCount);
         foreach (var line in lines)
         {
@@ -85,16 +88,13 @@ public static class PcanTrcCodec
         return parser.Complete();
     }
 
-    private static void ValidateChannel(int channel)
+    private static void ValidateArguments(int defaultChannel, int maximumFrameCount)
     {
-        if (channel < 0)
+        if (defaultChannel < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(channel));
+            throw new ArgumentOutOfRangeException(nameof(defaultChannel));
         }
-    }
 
-    private static void ValidateMaximumFrameCount(int maximumFrameCount)
-    {
         if (maximumFrameCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(maximumFrameCount));
@@ -106,6 +106,8 @@ public static class PcanTrcCodec
         private readonly int _defaultChannel;
         private readonly int _maximumFrameCount;
         private readonly List<CanFrame> _frames = [];
+        private Version _fileVersion = Version10;
+        private string[]? _columns;
         private DateTimeOffset _start = DateTimeOffset.UnixEpoch;
         private bool _haveStart;
 
@@ -131,10 +133,36 @@ public static class PcanTrcCodec
                 return;
             }
 
-            if (line.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("$STARTTIME=", StringComparison.OrdinalIgnoreCase))
+            if (TryReadKeyword(line, "$FILEVERSION", out var fileVersionText))
             {
-                TrySetStartTime(line);
+                if (!Version.TryParse(fileVersionText, out var parsedVersion) ||
+                    parsedVersion < Version10 || parsedVersion > Version30)
+                {
+                    throw new FormatException(
+                        $"Неподдерживаемая версия PEAK TRC: «{fileVersionText}». Поддерживаются версии 1.0–3.0.");
+                }
+
+                _fileVersion = parsedVersion;
+                HeaderAndCommentLines++;
+                return;
+            }
+
+            if (TryReadKeyword(line, "$STARTTIME", out var startText))
+            {
+                if (TryParseStartTime(startText, out var parsedStart))
+                {
+                    _start = parsedStart;
+                    _haveStart = true;
+                }
+
+                HeaderAndCommentLines++;
+                return;
+            }
+
+            if (TryReadKeyword(line, "$COLUMNS", out var columnsText))
+            {
+                _columns = columnsText
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 HeaderAndCommentLines++;
                 return;
             }
@@ -146,56 +174,53 @@ public static class PcanTrcCodec
             }
 
             var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (IsErrorOrStatusRecord(tokens, line))
-            {
-                ErrorFramesSkipped++;
-                return;
-            }
-
             if (IsRemoteRecord(tokens))
             {
                 RemoteFramesSkipped++;
                 return;
             }
 
-            if (!TryFindDirection(tokens, out var directionIndex, out var direction) ||
-                !TryFindIdDlcAndData(tokens, directionIndex, out var id, out var isExtended, out var data))
+            CanFrame? frame;
+            var parsed = _fileVersion.Major >= 2
+                ? TryParseVersion2Plus(
+                    tokens, _fileVersion, _columns, _start, _haveStart, _defaultChannel, out frame)
+                : TryParseVersion1(
+                    tokens, _fileVersion, _start, _haveStart, _defaultChannel, out frame);
+
+            // Some exported or concatenated field traces contain legacy rows
+            // under a newer header. Use a constrained fallback only when an
+            // explicit Rx/Tx token and a valid Classical CAN layout are found.
+            if (!parsed)
+            {
+                parsed = TryParseTolerantClassic(
+                    tokens, _start, _haveStart, _defaultChannel, out frame);
+            }
+
+            if (!parsed || frame is null)
+            {
+                ClassifySkippedRecord(tokens, line);
+                return;
+            }
+
+            try
+            {
+                frame.Validate();
+            }
+            catch (ArgumentException)
             {
                 UnknownOrMalformedLines++;
                 return;
             }
 
-            var offsetMs = TryFindOffsetMilliseconds(tokens, directionIndex, out var parsedOffset)
-                ? parsedOffset
-                : _frames.Count;
-            var timestamp = (_haveStart ? _start : DateTimeOffset.UnixEpoch).AddMilliseconds(offsetMs);
-            var frame = new CanFrame
+            if (_frames.Count >= _maximumFrameCount)
             {
-                Timestamp = timestamp,
-                Channel = _defaultChannel,
-                Id = id,
-                Data = data,
-                Protocol = BusProtocol.ClassicalCan,
-                Direction = direction,
-                IsExtended = isExtended
-            };
+                throw new InvalidDataException(
+                    $"TRC содержит больше {_maximumFrameCount:N0} обычных CAN-кадров. " +
+                    "Импорт остановлен до исчерпания памяти; исходный файл не изменён. " +
+                    "Разделите копию трассы в PCAN-View на более короткие интервалы.");
+            }
 
-            try
-            {
-                frame.Validate();
-                if (_frames.Count >= _maximumFrameCount)
-                {
-                    throw new InvalidDataException(
-                        $"TRC содержит больше {_maximumFrameCount:N0} обычных CAN-кадров. " +
-                        "Импорт остановлен до исчерпания памяти; исходный файл не изменён. " +
-                        "Разделите трассу в PCAN-View на более короткие интервалы.");
-                }
-                _frames.Add(frame);
-            }
-            catch (ArgumentException)
-            {
-                UnknownOrMalformedLines++;
-            }
+            _frames.Add(frame);
         }
 
         public PcanTrcImportResult Complete()
@@ -204,7 +229,7 @@ public static class PcanTrcCodec
             {
                 throw new FormatException(
                     "TRC-файл не содержит обычных кадров Classical CAN с данными. " +
-                    "Комментарии, RTR, error/status и повреждённые строки были пропущены.");
+                    "Комментарии, RTR, error/status, неподдерживаемые типы и повреждённые строки были пропущены.");
             }
 
             return new PcanTrcImportResult(
@@ -216,70 +241,200 @@ public static class PcanTrcCodec
                 UnknownOrMalformedLines);
         }
 
-        private void TrySetStartTime(string line)
+        private void ClassifySkippedRecord(IReadOnlyList<string> tokens, string line)
         {
-            var separator = line.IndexOf('=');
-            if (separator < 0)
+            if (IsRemoteRecord(tokens))
             {
-                return;
+                RemoteFramesSkipped++;
             }
-
-            var value = line[(separator + 1)..].Trim();
-            if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
+            else if (IsErrorStatusOrUnsupportedRecord(tokens, line, _columns))
             {
-                return;
+                ErrorFramesSkipped++;
             }
-
-            try
+            else
             {
-                var local = DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Local);
-                _start = new DateTimeOffset(local).ToUniversalTime();
-                _haveStart = true;
-            }
-            catch (ArgumentException)
-            {
-                // Invalid metadata must not discard otherwise valid CAN frames.
+                UnknownOrMalformedLines++;
             }
         }
     }
 
-    private static bool TryFindDirection(
+    private static bool TryParseVersion1(
         IReadOnlyList<string> tokens,
-        out int directionIndex,
-        out CanDirection direction)
+        Version version,
+        DateTimeOffset start,
+        bool haveStart,
+        int defaultChannel,
+        out CanFrame? frame)
     {
-        for (var index = 0; index < tokens.Count; index++)
+        frame = null;
+        if (version > Version13)
         {
-            if (tokens[index].Equals("Rx", StringComparison.OrdinalIgnoreCase))
-            {
-                directionIndex = index;
-                direction = CanDirection.Rx;
-                return true;
-            }
-
-            if (tokens[index].Equals("Tx", StringComparison.OrdinalIgnoreCase))
-            {
-                directionIndex = index;
-                direction = CanDirection.Tx;
-                return true;
-            }
+            throw new FormatException(
+                $"Неподдерживаемая версия PEAK TRC 1.x: {version.Major}.{version.Minor}.");
         }
 
-        directionIndex = -1;
-        direction = default;
-        return false;
+        if (tokens.Count < 4 || !TryParseOffsetMilliseconds(tokens[1], out var offsetMilliseconds))
+        {
+            return false;
+        }
+
+        int idIndex;
+        int lengthIndex;
+        int dataIndex;
+        int? busIndex = null;
+        var direction = CanDirection.Rx;
+
+        switch (version.Minor)
+        {
+            case 0:
+                idIndex = 2;
+                lengthIndex = 3;
+                dataIndex = 4;
+                break;
+            case 1:
+                if (tokens.Count < 5 || !TryParseDirection(tokens[2], out direction))
+                {
+                    return false;
+                }
+
+                idIndex = 3;
+                lengthIndex = 4;
+                dataIndex = 5;
+                break;
+            case 2:
+                if (tokens.Count < 6 || !TryParseDirection(tokens[3], out direction))
+                {
+                    return false;
+                }
+
+                busIndex = 2;
+                idIndex = 4;
+                lengthIndex = 5;
+                dataIndex = 6;
+                break;
+            case 3:
+                if (tokens.Count < 7 || !TryParseDirection(tokens[3], out direction))
+                {
+                    return false;
+                }
+
+                busIndex = 2;
+                idIndex = 4;
+                lengthIndex = 6;
+                dataIndex = 7;
+                break;
+            default:
+                return false;
+        }
+
+        if (!TryParseCanId(tokens[idIndex], out var id, out var isExtended) ||
+            !TryParseClassicalLength(tokens[lengthIndex], out var dataLength) ||
+            !TryParseData(tokens, dataIndex, dataLength, out var data))
+        {
+            return false;
+        }
+
+        var channel = defaultChannel;
+        if (busIndex.HasValue && !TryMapBusChannel(tokens[busIndex.Value], defaultChannel, out channel))
+        {
+            return false;
+        }
+
+        frame = CreateFrame(
+            start, haveStart, offsetMilliseconds, channel, id, isExtended, direction, data);
+        return true;
     }
 
-    private static bool TryFindIdDlcAndData(
+    private static bool TryParseVersion2Plus(
         IReadOnlyList<string> tokens,
-        int directionIndex,
-        out uint id,
-        out bool isExtended,
-        out byte[] data)
+        Version version,
+        IReadOnlyList<string>? columns,
+        DateTimeOffset start,
+        bool haveStart,
+        int defaultChannel,
+        out CanFrame? frame)
     {
-        // PCAN 1.x: number, offset, Rx/Tx, ID, DLC, DATA.
-        // PCAN 2.x: number, offset, type, bus, ID, Rx/Tx, [reserved], DLC, DATA.
-        // Checking the adjacent fields first prevents DATA[0] from being mistaken for an ID.
+        frame = null;
+        if (columns is null || columns.Count == 0)
+        {
+            throw new FormatException(
+                $"PEAK TRC {version.Major}.{version.Minor} требует заголовок $COLUMNS.");
+        }
+
+        var typeColumn = IndexOfColumn(columns, "T");
+        if (typeColumn < 0 || typeColumn >= tokens.Count ||
+            !tokens[typeColumn].Equals("DT", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var tokenIndex = 0;
+        var dataIndex = -1;
+        foreach (var column in columns)
+        {
+            if (column == "D")
+            {
+                dataIndex = tokenIndex;
+                break;
+            }
+
+            if (tokenIndex >= tokens.Count)
+            {
+                return false;
+            }
+
+            values[column] = tokens[tokenIndex++];
+        }
+
+        if (dataIndex < 0 ||
+            !values.TryGetValue("O", out var offsetText) ||
+            !TryParseOffsetMilliseconds(offsetText, out var offsetMilliseconds) ||
+            !values.TryGetValue("I", out var idText) ||
+            !TryParseCanId(idText, out var id, out var isExtended) ||
+            !values.TryGetValue("d", out var directionText) ||
+            !TryParseDirection(directionText, out var direction))
+        {
+            return false;
+        }
+
+        var lengthText = values.TryGetValue("l", out var actualLength)
+            ? actualLength
+            : values.TryGetValue("L", out var dlc)
+                ? dlc
+                : null;
+        if (lengthText is null ||
+            !TryParseClassicalLength(lengthText, out var dataLength) ||
+            !TryParseData(tokens, dataIndex, dataLength, out var data))
+        {
+            return false;
+        }
+
+        var channel = defaultChannel;
+        if (values.TryGetValue("B", out var busText) &&
+            !TryMapBusChannel(busText, defaultChannel, out channel))
+        {
+            return false;
+        }
+
+        frame = CreateFrame(
+            start, haveStart, offsetMilliseconds, channel, id, isExtended, direction, data);
+        return true;
+    }
+
+    private static bool TryParseTolerantClassic(
+        IReadOnlyList<string> tokens,
+        DateTimeOffset start,
+        bool haveStart,
+        int defaultChannel,
+        out CanFrame? frame)
+    {
+        frame = null;
+        if (!TryFindDirection(tokens, out var directionIndex, out var direction))
+        {
+            return false;
+        }
+
         var candidates = new[]
         {
             directionIndex + 1,
@@ -292,50 +447,131 @@ public static class PcanTrcCodec
 
         foreach (var idIndex in candidates.Where(index => index >= 0 && index < tokens.Count).Distinct())
         {
-            if (!TryParseCanId(tokens[idIndex], out var candidateId, out var explicitExtended))
+            if (!TryParseCanId(tokens[idIndex], out var id, out var isExtended))
             {
                 continue;
             }
 
-            var dlcSearchStart = Math.Max(directionIndex, idIndex) + 1;
-            if (!TryFindDlcAndData(tokens, dlcSearchStart, out var candidateData))
+            var dataSearchStart = Math.Max(directionIndex, idIndex) + 1;
+            if (!TryFindLengthAndData(tokens, dataSearchStart, out var data))
             {
                 continue;
             }
 
-            id = candidateId;
-            isExtended = explicitExtended || candidateId > 0x7FF;
-            data = candidateData;
+            var offsetMilliseconds = TryFindOffsetMilliseconds(tokens, directionIndex, out var parsedOffset)
+                ? parsedOffset
+                : 0;
+            frame = CreateFrame(
+                start, haveStart, offsetMilliseconds, defaultChannel, id, isExtended, direction, data);
             return true;
         }
 
-        id = 0;
-        isExtended = false;
-        data = [];
         return false;
     }
 
-    private static bool TryParseCanId(string token, out uint id, out bool explicitExtended)
+    private static CanFrame CreateFrame(
+        DateTimeOffset start,
+        bool haveStart,
+        double offsetMilliseconds,
+        int channel,
+        uint id,
+        bool isExtended,
+        CanDirection direction,
+        byte[] data) => new()
     {
-        var value = token.Trim();
-        explicitExtended = value.EndsWith('x') || value.EndsWith('X');
-        value = value.TrimEnd('h', 'H', 'x', 'X');
-        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        Timestamp = (haveStart ? start : DateTimeOffset.UnixEpoch).AddMilliseconds(offsetMilliseconds),
+        Channel = channel,
+        Id = id,
+        Data = data,
+        Protocol = BusProtocol.ClassicalCan,
+        Direction = direction,
+        IsExtended = isExtended
+    };
+
+    private static bool TryReadKeyword(string line, string keyword, out string value)
+    {
+        var source = line[0] == ';' ? line[1..] : line;
+        var prefix = keyword + "=";
+        if (source.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
-            value = value[2..];
+            value = source[prefix.Length..].Trim().TrimEnd(';').Trim();
+            return true;
         }
 
-        if (value.Length is < 2 or > 8 || !value.All(Uri.IsHexDigit) ||
-            !uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out id))
+        value = string.Empty;
+        return false;
+    }
+
+    private static bool TryParseStartTime(string text, out DateTimeOffset start)
+    {
+        start = DateTimeOffset.UnixEpoch;
+        if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
         {
-            id = 0;
             return false;
         }
 
-        return id <= 0x1FFFFFFF;
+        try
+        {
+            var local = DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Local);
+            start = new DateTimeOffset(local).ToUniversalTime();
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
-    private static bool TryFindDlcAndData(
+    private static bool TryParseOffsetMilliseconds(string token, out double milliseconds)
+    {
+        token = token.Trim().TrimEnd(')', ':');
+        if (!token.Contains('.') && token.Contains(','))
+        {
+            token = token.Replace(',', '.');
+        }
+
+        return double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out milliseconds) &&
+               milliseconds >= 0;
+    }
+
+    private static bool TryParseDirection(string token, out CanDirection direction)
+    {
+        if (token.Equals("Rx", StringComparison.OrdinalIgnoreCase))
+        {
+            direction = CanDirection.Rx;
+            return true;
+        }
+
+        if (token.Equals("Tx", StringComparison.OrdinalIgnoreCase))
+        {
+            direction = CanDirection.Tx;
+            return true;
+        }
+
+        direction = default;
+        return false;
+    }
+
+    private static bool TryFindDirection(
+        IReadOnlyList<string> tokens,
+        out int directionIndex,
+        out CanDirection direction)
+    {
+        for (var index = 0; index < tokens.Count; index++)
+        {
+            if (TryParseDirection(tokens[index], out direction))
+            {
+                directionIndex = index;
+                return true;
+            }
+        }
+
+        directionIndex = -1;
+        direction = default;
+        return false;
+    }
+
+    private static bool TryFindLengthAndData(
         IReadOnlyList<string> tokens,
         int searchStart,
         out byte[] data)
@@ -343,46 +579,17 @@ public static class PcanTrcCodec
         var searchEnd = Math.Min(tokens.Count, searchStart + 3);
         for (var index = searchStart; index < searchEnd; index++)
         {
-            if (!int.TryParse(tokens[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dlc) ||
-                dlc is < 0 or > 8 ||
-                tokens.Count - index - 1 < dlc)
+            if (!TryParseClassicalLength(tokens[index], out var length) ||
+                !TryParseData(tokens, index + 1, length, out data))
             {
                 continue;
             }
 
-            var bytes = new byte[dlc];
-            var valid = true;
-            for (var byteIndex = 0; byteIndex < dlc; byteIndex++)
-            {
-                if (!TryParseByte(tokens[index + 1 + byteIndex], out bytes[byteIndex]))
-                {
-                    valid = false;
-                    break;
-                }
-            }
-
-            if (valid)
-            {
-                data = bytes;
-                return true;
-            }
+            return true;
         }
 
         data = [];
         return false;
-    }
-
-    private static bool TryParseByte(string source, out byte value)
-    {
-        var token = source.Trim().TrimEnd('h', 'H');
-        if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            token = token[2..];
-        }
-
-        value = 0;
-        return token.Length is 1 or 2 &&
-               byte.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
     }
 
     private static bool TryFindOffsetMilliseconds(
@@ -393,19 +600,7 @@ public static class PcanTrcCodec
         var startIndex = LooksLikeMessageNumber(tokens[0]) ? 1 : 0;
         for (var index = startIndex; index < directionIndex; index++)
         {
-            var token = tokens[index].Trim().TrimEnd(')', ':');
-            if (token.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
-            {
-                token = token[..^2];
-            }
-
-            if (!token.Contains('.') && token.Contains(','))
-            {
-                token = token.Replace(',', '.');
-            }
-
-            if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out milliseconds) &&
-                milliseconds >= 0)
+            if (TryParseOffsetMilliseconds(tokens[index], out milliseconds))
             {
                 return true;
             }
@@ -421,19 +616,119 @@ public static class PcanTrcCodec
         if (value.EndsWith(')'))
         {
             value = value[..^1];
-            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
         }
 
         return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
     }
 
+    private static bool TryParseCanId(string token, out uint id, out bool isExtended)
+    {
+        var value = token.Trim();
+        var explicitExtended = value.EndsWith('x') || value.EndsWith('X');
+        value = value.TrimEnd('h', 'H', 'x', 'X');
+        if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            value = value[2..];
+        }
+
+        if (value.Length is < 1 or > 8 || !value.All(Uri.IsHexDigit) ||
+            !uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out id))
+        {
+            isExtended = false;
+            id = 0;
+            return false;
+        }
+
+        isExtended = explicitExtended || value.Length == 8 || id > 0x7FF;
+        return id <= (isExtended ? 0x1FFFFFFFu : 0x7FFu);
+    }
+
+    private static bool TryParseClassicalLength(string token, out int length) =>
+        int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out length) &&
+        length is >= 0 and <= 8;
+
+    private static bool TryParseData(
+        IReadOnlyList<string> tokens,
+        int dataIndex,
+        int dataLength,
+        out byte[] data)
+    {
+        data = [];
+        if (dataIndex < 0 || tokens.Count - dataIndex < dataLength)
+        {
+            return false;
+        }
+
+        var bytes = new byte[dataLength];
+        for (var index = 0; index < dataLength; index++)
+        {
+            var token = tokens[dataIndex + index].Trim().TrimEnd('h', 'H');
+            if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                token = token[2..];
+            }
+
+            if (token.Length is < 1 or > 2 ||
+                !byte.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[index]))
+            {
+                return false;
+            }
+        }
+
+        data = bytes;
+        return true;
+    }
+
+    private static bool TryMapBusChannel(string token, int defaultChannel, out int channel)
+    {
+        if (!int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bus) ||
+            bus is < 1 or > 16)
+        {
+            channel = defaultChannel;
+            return false;
+        }
+
+        channel = checked(defaultChannel + bus - 1);
+        return true;
+    }
+
     private static bool IsRemoteRecord(IEnumerable<string> tokens) => tokens.Any(token =>
         token.Equals("RTR", StringComparison.OrdinalIgnoreCase) ||
-        token.Equals("REMOTE", StringComparison.OrdinalIgnoreCase));
+        token.Equals("REMOTE", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("RR", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsErrorOrStatusRecord(IEnumerable<string> tokens, string line) =>
-        line.Contains("Error Frame", StringComparison.OrdinalIgnoreCase) ||
-        tokens.Any(token =>
-            token.Equals("ER", StringComparison.OrdinalIgnoreCase) ||
-            token.Equals("STATUS", StringComparison.OrdinalIgnoreCase));
+    private static bool IsErrorStatusOrUnsupportedRecord(
+        IReadOnlyList<string> tokens,
+        string line,
+        IReadOnlyList<string>? columns)
+    {
+        if (line.Contains("Error Frame", StringComparison.OrdinalIgnoreCase) ||
+            tokens.Any(token => token.Equals("STATUS", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var typeIndex = columns is null ? -1 : IndexOfColumn(columns, "T");
+        if (typeIndex < 0 || typeIndex >= tokens.Count)
+        {
+            return tokens.Any(token => token.Equals("ER", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return tokens[typeIndex].ToUpperInvariant() is
+            "ER" or "ST" or "EC" or "EV" or "PE" or "OF" or "EN" or
+            "FD" or "FB" or "FE" or "BI" or "XL";
+    }
+
+    private static int IndexOfColumn(IReadOnlyList<string> columns, string column)
+    {
+        for (var index = 0; index < columns.Count; index++)
+        {
+            if (columns[index].Equals(column, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
 }
