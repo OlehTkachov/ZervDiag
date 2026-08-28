@@ -10,7 +10,7 @@ public sealed record TraceWindow(double StartMilliseconds, double EndMillisecond
         if (StartMilliseconds < 0 || EndMilliseconds <= StartMilliseconds)
         {
             throw new ArgumentOutOfRangeException(nameof(EndMilliseconds),
-                "Trace window end must be greater than start and start must be non-negative.");
+                "Конец временного окна должен быть больше начала, а начало не может быть отрицательным.");
         }
     }
 }

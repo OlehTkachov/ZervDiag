@@ -276,7 +276,7 @@ public static class GenericExperimentComparator
 
     private static double GetAgreement(GenericCanConsensus consensus, int index) =>
         index < consensus.ByteAgreementPercent.Length
-            ? consensus.ByteAgreementPercent[index]
+            ? Math.Min(consensus.ModalDlcAgreementPercent, consensus.ByteAgreementPercent[index])
             : 0;
 
     private static bool IsSingleBit(byte value) => value != 0 && (value & (value - 1)) == 0;

@@ -160,6 +160,13 @@ Require(zeroDlcFrame.Direction == CanDirection.Tx && zeroDlcFrame.Dlc == 0,
 Require((standardJchFrames[1].Timestamp - standardJchFrames[0].Timestamp).TotalMilliseconds == 10,
     "TRC timestamps were not preserved in milliseconds.");
 
+var explicitlyExtended = PcanTrcCodec.Parse(new[]
+{
+    "1) 0.000 Rx 00000123x 1 AA"
+}).Single();
+Require(explicitlyExtended.Id == 0x123 && explicitlyExtended.IsExtended,
+    "An explicitly extended 29-bit PCAN ID with a low numeric value was not preserved.");
+
 var jchExperiment = await GenericTraceExperiment.CompareWindowsAsync(
     fixturePath,
     new TraceWindow(0, 40),
@@ -167,6 +174,8 @@ var jchExperiment = await GenericTraceExperiment.CompareWindowsAsync(
     channel: 2);
 var jchByte1 = jchExperiment.Comparisons.Single(row => row.Id == 0x18F && row.DataIndex == 1);
 var jchByte2 = jchExperiment.Comparisons.Single(row => row.Id == 0x18F && row.DataIndex == 2);
+Require(jchExperiment.ReferenceFrameCount == 4 && jchExperiment.ActionFrameCount == 4,
+    "TRC temporal windows selected an incorrect number of frames.");
 Require(jchByte1.ReferenceValue == 0x00 && jchByte1.ActionValue == 0x02 && jchByte1.XorMask == 0x02 &&
         jchByte1.ChangedBits.Contains("bit 1: 0→1"),
     "JCH4 08 00 00 00 00 → 08 02 C8 00 00 transition was not detected at DATA[1].");
@@ -195,9 +204,39 @@ Require(noisyChange.IsChanged && noisyChange.Priority == GenericCanChangePriorit
         noisyChange.Kind == GenericCanChangeKind.UnstableOrAnalogNoise && !noisyChange.IsSignificant,
     "Continuous analog-like noise must remain visible but receive low priority.");
 
+var variableDlcReference = CreateClassicalFrames(now, 0x410, false, 4,
+    index => index % 2 == 0 ? new byte[] { 0x10 } : new byte[] { 0x10, 0x20 });
+var variableDlcAction = CreateClassicalFrames(now, 0x410, false, 4,
+    index => index % 2 == 0 ? new byte[] { 0x11 } : new byte[] { 0x11, 0x20 });
+var variableDlcChange = GenericExperimentComparator.Compare(variableDlcReference, variableDlcAction)
+    .Single(row => row.Id == 0x410 && row.DataIndex == 0);
+Require(variableDlcChange.Priority == GenericCanChangePriority.Low &&
+        variableDlcChange.ReferenceAgreementPercent == 50 &&
+        variableDlcChange.ActionAgreementPercent == 50,
+    "A changing DLC must reduce agreement instead of producing a false stable change.");
+
+var identicalFiles = await GenericTraceExperiment.CompareFilesAsync(fixturePath, fixturePath, channel: 2);
+Require(identicalFiles.Comparisons.All(row => !row.IsChanged),
+    "Two identical TRC files must not produce Reference/Action changes.");
+
+var emptyWindowError = CaptureException(() => GenericTraceExperiment.CompareWindows(
+    trcImport.Frames,
+    new TraceWindow(300, 400),
+    new TraceWindow(0, 40)));
+Require(emptyWindowError is InvalidOperationException && emptyWindowError.Message.Contains("REFERENCE"),
+    "An empty Reference window must produce a clear Russian error.");
+
 var emptyTrcError = CaptureException(() => PcanTrcCodec.Parse(new[] { "; only header", "unknown" }));
 Require(emptyTrcError is FormatException && emptyTrcError.Message.Contains("не содержит"),
     "Empty/invalid TRC must produce a clear format error.");
+
+var oversizedTrcError = CaptureException(() => PcanTrcCodec.Parse(new[]
+{
+    "1) 0.000 Rx 123 1 00",
+    "2) 1.000 Rx 123 1 01"
+}, maximumFrameCount: 1));
+Require(oversizedTrcError is InvalidDataException && oversizedTrcError.Message.Contains("исходный файл не изменён"),
+    "An oversized TRC must stop with a clear memory-safety message.");
 
 var onkTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-{Guid.NewGuid():N}.csv");
 var canTemporaryFile = Path.Combine(Path.GetTempPath(), $"classical-can-{Guid.NewGuid():N}.csv");

@@ -22,6 +22,8 @@ public sealed record PcanTrcImportResult(
 /// </summary>
 public static class PcanTrcCodec
 {
+    public const int DefaultMaximumFrameCount = 1_000_000;
+
     public static async Task<IReadOnlyList<CanFrame>> LoadAsync(
         string path,
         int defaultChannel = 0,
@@ -31,9 +33,11 @@ public static class PcanTrcCodec
     public static async Task<PcanTrcImportResult> LoadWithDiagnosticsAsync(
         string path,
         int defaultChannel = 0,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int maximumFrameCount = DefaultMaximumFrameCount)
     {
         ValidateChannel(defaultChannel);
+        ValidateMaximumFrameCount(maximumFrameCount);
         if (string.IsNullOrWhiteSpace(path))
         {
             throw new ArgumentException("Путь к TRC-файлу не задан.", nameof(path));
@@ -47,7 +51,7 @@ public static class PcanTrcCodec
             bufferSize: 64 * 1024,
             options: FileOptions.SequentialScan);
         using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
-        var parser = new ParserState(defaultChannel);
+        var parser = new ParserState(defaultChannel, maximumFrameCount);
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
         {
@@ -58,16 +62,21 @@ public static class PcanTrcCodec
         return parser.Complete();
     }
 
-    public static IReadOnlyList<CanFrame> Parse(IEnumerable<string> lines, int defaultChannel = 0) =>
-        ParseWithDiagnostics(lines, defaultChannel).Frames;
+    public static IReadOnlyList<CanFrame> Parse(
+        IEnumerable<string> lines,
+        int defaultChannel = 0,
+        int maximumFrameCount = DefaultMaximumFrameCount) =>
+        ParseWithDiagnostics(lines, defaultChannel, maximumFrameCount).Frames;
 
     public static PcanTrcImportResult ParseWithDiagnostics(
         IEnumerable<string> lines,
-        int defaultChannel = 0)
+        int defaultChannel = 0,
+        int maximumFrameCount = DefaultMaximumFrameCount)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ValidateChannel(defaultChannel);
-        var parser = new ParserState(defaultChannel);
+        ValidateMaximumFrameCount(maximumFrameCount);
+        var parser = new ParserState(defaultChannel, maximumFrameCount);
         foreach (var line in lines)
         {
             parser.Process(line);
@@ -84,14 +93,27 @@ public static class PcanTrcCodec
         }
     }
 
+    private static void ValidateMaximumFrameCount(int maximumFrameCount)
+    {
+        if (maximumFrameCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumFrameCount));
+        }
+    }
+
     private sealed class ParserState
     {
         private readonly int _defaultChannel;
+        private readonly int _maximumFrameCount;
         private readonly List<CanFrame> _frames = [];
         private DateTimeOffset _start = DateTimeOffset.UnixEpoch;
         private bool _haveStart;
 
-        public ParserState(int defaultChannel) => _defaultChannel = defaultChannel;
+        public ParserState(int defaultChannel, int maximumFrameCount)
+        {
+            _defaultChannel = defaultChannel;
+            _maximumFrameCount = maximumFrameCount;
+        }
 
         public int TotalLines { get; private set; }
         public int HeaderAndCommentLines { get; private set; }
@@ -161,6 +183,13 @@ public static class PcanTrcCodec
             try
             {
                 frame.Validate();
+                if (_frames.Count >= _maximumFrameCount)
+                {
+                    throw new InvalidDataException(
+                        $"TRC содержит больше {_maximumFrameCount:N0} обычных CAN-кадров. " +
+                        "Импорт остановлен до исчерпания памяти; исходный файл не изменён. " +
+                        "Разделите трассу в PCAN-View на более короткие интервалы.");
+                }
                 _frames.Add(frame);
             }
             catch (ArgumentException)
