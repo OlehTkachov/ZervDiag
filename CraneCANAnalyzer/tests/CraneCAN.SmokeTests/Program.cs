@@ -6,9 +6,11 @@ using CraneCAN.Core.Storage;
 using System.Text;
 
 var now = DateTimeOffset.UtcNow;
-Require(Enum.GetValues<BusProtocol>().SequenceEqual(new[] { BusProtocol.Onk160Serial }),
-    "The ONK-160 test build must not expose another bus protocol.");
-Require(BuiltInProfiles.All.Count == 1, "The ONK-160 test build must expose exactly one profile.");
+Require(Enum.GetValues<BusProtocol>().Contains(BusProtocol.Onk160Serial),
+    "ONK-160 protocol marker missing.");
+Require(Enum.GetValues<BusProtocol>().Contains(BusProtocol.ClassicalCan),
+    "Classical CAN protocol marker missing.");
+Require(BuiltInProfiles.All.Count == 1, "The ONK-160 test profile set must remain unchanged.");
 var onk = BuiltInProfiles.All.Single(profile => profile.Id == "onk160s-02-ks55727");
 Require(onk.ConfirmedBitrate == 38_400, "ONK-160 bitrate must be 38400 bit/s.");
 Require(onk.Protocol.Contains("8E1"), "ONK-160 8E1 profile marker missing.");
@@ -95,7 +97,37 @@ foreach (var frame in onkFrames)
     frame.Validate();
 }
 
+var referenceCan = Enumerable.Range(0, 4).Select(index => new CanFrame
+{
+    Timestamp = now.AddMilliseconds(1000 + index * 20),
+    Channel = 0,
+    Id = 0x181,
+    Data = new byte[] { 0x10, 0x20, 0x00, 0x40, 0x50, 0x60, 0x70, 0x80 },
+    Protocol = BusProtocol.ClassicalCan,
+    Direction = CanDirection.Rx
+}).ToArray();
+var actionCan = Enumerable.Range(0, 4).Select(index => new CanFrame
+{
+    Timestamp = now.AddMilliseconds(1200 + index * 20),
+    Channel = 0,
+    Id = 0x181,
+    Data = new byte[] { 0x10, 0x20, 0x20, 0x40, 0x50, 0x60, 0x70, 0x80 },
+    Protocol = BusProtocol.ClassicalCan,
+    Direction = CanDirection.Rx
+}).ToArray();
+Require(referenceCan.All(frame => frame.Dlc == 8 && frame.IdText == "181"),
+    "Classical CAN DLC or standard identifier formatting is incorrect.");
+var genericComparison = GenericExperimentComparator.Compare(referenceCan, actionCan);
+var genericBitChange = genericComparison.Single(row => row.Id == 0x181 && row.DataIndex == 2);
+Require(genericBitChange.ReferenceValue == 0x00 && genericBitChange.ActionValue == 0x20,
+    "Generic experiment comparison did not preserve the CAN byte transition.");
+Require(genericBitChange.XorMask == 0x20 && genericBitChange.ChangedBits.Contains("5: 0→1"),
+    "Generic experiment comparison did not identify CAN bit 5.");
+Require(genericBitChange.ReferenceAgreementPercent == 100 && genericBitChange.ActionAgreementPercent == 100,
+    "Stable generic CAN values must have 100 percent agreement.");
+
 var onkTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-{Guid.NewGuid():N}.csv");
+var canTemporaryFile = Path.Combine(Path.GetTempPath(), $"classical-can-{Guid.NewGuid():N}.csv");
 var benchTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-bench-{Guid.NewGuid():N}.csv");
 try
 {
@@ -106,6 +138,12 @@ try
         "ONK CSV protocol marker was not restored.");
     Require(restoredOnk.All(frame => frame.IsChecksumValid == true),
         "ONK CSV checksum state was not restored.");
+
+    await CanCsvCodec.SaveAsync(canTemporaryFile, referenceCan);
+    var restoredCan = await CanCsvCodec.LoadAsync(canTemporaryFile);
+    Require(restoredCan.Count == referenceCan.Length &&
+            restoredCan.All(frame => frame.Protocol == BusProtocol.ClassicalCan && frame.Dlc == 8),
+        "Classical CAN CSV round-trip failed.");
 
     await Onk160BenchReportCodec.SaveAsync(
         benchTemporaryFile,
@@ -131,6 +169,11 @@ finally
     if (File.Exists(onkTemporaryFile))
     {
         File.Delete(onkTemporaryFile);
+    }
+
+    if (File.Exists(canTemporaryFile))
+    {
+        File.Delete(canTemporaryFile);
     }
 
     if (File.Exists(benchTemporaryFile))

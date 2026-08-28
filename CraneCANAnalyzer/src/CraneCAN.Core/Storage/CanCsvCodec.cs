@@ -46,7 +46,7 @@ public static class CanCsvCodec
         var firstLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
         if (!string.Equals(firstLine, Header, StringComparison.Ordinal))
         {
-            throw new FormatException("Файл не является журналом тестовой редакции ОНК-160.");
+            throw new FormatException("Файл не является журналом CraneCAN Analyzer.");
         }
 
         string? line;
@@ -71,12 +71,6 @@ public static class CanCsvCodec
                     .Select(value => byte.Parse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture))
                     .ToArray();
 
-            var protocol = Enum.Parse<BusProtocol>(columns[3], true);
-            if (protocol != BusProtocol.Onk160Serial)
-            {
-                throw new FormatException($"Строка {lineNumber}: разрешены только данные ОНК-160.");
-            }
-
             bool? checksumValid = string.IsNullOrWhiteSpace(columns[8])
                 ? null
                 : bool.Parse(columns[8]);
@@ -86,7 +80,7 @@ public static class CanCsvCodec
                 Timestamp = DateTimeOffset.Parse(columns[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
                 Channel = int.Parse(columns[1], CultureInfo.InvariantCulture),
                 Direction = Enum.Parse<CanDirection>(columns[2], true),
-                Protocol = protocol,
+                Protocol = Enum.Parse<BusProtocol>(columns[3], true),
                 Id = uint.Parse(columns[4], NumberStyles.HexNumber, CultureInfo.InvariantCulture),
                 IsExtended = bool.Parse(columns[5]),
                 IsRemote = bool.Parse(columns[6]),
