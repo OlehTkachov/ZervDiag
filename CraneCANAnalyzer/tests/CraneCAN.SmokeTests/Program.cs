@@ -125,6 +125,79 @@ Require(genericBitChange.XorMask == 0x20 && genericBitChange.ChangedBits.Contain
     "Generic experiment comparison did not identify CAN bit 5.");
 Require(genericBitChange.ReferenceAgreementPercent == 100 && genericBitChange.ActionAgreementPercent == 100,
     "Stable generic CAN values must have 100 percent agreement.");
+Require(genericBitChange.Priority == GenericCanChangePriority.VeryHigh && genericBitChange.IsSignificant,
+    "A stable single-bit change must receive very high priority.");
+
+var fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "soosan_mixed.trc");
+var trcImport = await PcanTrcCodec.LoadWithDiagnosticsAsync(fixturePath, defaultChannel: 2);
+Require(trcImport.Frames.Count == 21, "SOOSAN TRC fixture frame count mismatch.");
+Require(trcImport.Frames.Select(frame => frame.Timestamp).SequenceEqual(
+        trcImport.Frames.Select(frame => frame.Timestamp).OrderBy(value => value)),
+    "TRC importer changed the original frame order.");
+Require(trcImport.ErrorFramesSkipped == 1 && trcImport.RemoteFramesSkipped == 1 &&
+        trcImport.UnknownOrMalformedLines == 1,
+    "TRC importer diagnostics did not count error, RTR and unknown rows.");
+
+var requiredHydacIds = new uint[]
+{
+    0x18012101, 0x0CFF1421, 0x0CFF2221, 0x18800121,
+    0x0CFF2121, 0x0CFF3621, 0x0CFF5821, 0x188C0121,
+    0x18740121, 0x18720121, 0x0CFF5321, 0x0CF00400
+};
+foreach (var hydacId in requiredHydacIds)
+{
+    var hydacFrame = trcImport.Frames.Single(frame => frame.Id == hydacId);
+    Require(hydacFrame.IsExtended && hydacFrame.Dlc == 8 && hydacFrame.Channel == 2,
+        $"HYDAC extended ID {hydacId:X8} was not preserved.");
+}
+
+var standardJchFrames = trcImport.Frames.Where(frame => frame.Id == 0x18F).ToArray();
+Require(standardJchFrames.Length == 8 && standardJchFrames.All(frame => !frame.IsExtended && frame.Dlc == 5),
+    "JCH4 standard 0x18F frames were not imported correctly.");
+var zeroDlcFrame = trcImport.Frames.Single(frame => frame.Id == 0x18A);
+Require(zeroDlcFrame.Direction == CanDirection.Tx && zeroDlcFrame.Dlc == 0,
+    "TRC importer did not preserve Tx DLC=0 frame.");
+Require((standardJchFrames[1].Timestamp - standardJchFrames[0].Timestamp).TotalMilliseconds == 10,
+    "TRC timestamps were not preserved in milliseconds.");
+
+var jchExperiment = await GenericTraceExperiment.CompareWindowsAsync(
+    fixturePath,
+    new TraceWindow(0, 40),
+    new TraceWindow(200, 240),
+    channel: 2);
+var jchByte1 = jchExperiment.Comparisons.Single(row => row.Id == 0x18F && row.DataIndex == 1);
+var jchByte2 = jchExperiment.Comparisons.Single(row => row.Id == 0x18F && row.DataIndex == 2);
+Require(jchByte1.ReferenceValue == 0x00 && jchByte1.ActionValue == 0x02 && jchByte1.XorMask == 0x02 &&
+        jchByte1.ChangedBits.Contains("bit 1: 0→1"),
+    "JCH4 08 00 00 00 00 → 08 02 C8 00 00 transition was not detected at DATA[1].");
+Require(jchByte2.ReferenceValue == 0x00 && jchByte2.ActionValue == 0xC8 && jchByte2.XorMask == 0xC8,
+    "JCH4 transition was not detected at DATA[2].");
+Require(jchByte1.Kind == GenericCanChangeKind.MultipleStableBytes && jchByte1.IsSignificant,
+    "Multiple stable JCH4 byte changes were not ranked as significant.");
+
+var presenceReference = CreateClassicalFrames(now, 0x300, false, 4, _ => new byte[] { 0x00 })
+    .Concat(CreateClassicalFrames(now, 0x301, false, 4, _ => new byte[] { 0x11 }));
+var presenceAction = CreateClassicalFrames(now, 0x300, false, 4, _ => new byte[] { 0x00 })
+    .Concat(CreateClassicalFrames(now, 0x302, false, 4, _ => new byte[] { 0x22 }));
+var presenceComparison = GenericExperimentComparator.Compare(presenceReference, presenceAction);
+Require(presenceComparison.Single(row => row.Id == 0x301).MessageDisappeared,
+    "Disappeared CAN ID was not reported.");
+Require(presenceComparison.Single(row => row.Id == 0x302).MessageAppeared,
+    "Appeared CAN ID was not reported.");
+
+var noisyReference = CreateClassicalFrames(now, 0x400, false, 4,
+    index => new byte[] { (byte)(0x10 + index) });
+var noisyAction = CreateClassicalFrames(now, 0x400, false, 4,
+    index => new byte[] { (byte)(0x11 + index) });
+var noisyChange = GenericExperimentComparator.Compare(noisyReference, noisyAction)
+    .Single(row => row.Id == 0x400 && row.DataIndex == 0);
+Require(noisyChange.IsChanged && noisyChange.Priority == GenericCanChangePriority.Low &&
+        noisyChange.Kind == GenericCanChangeKind.UnstableOrAnalogNoise && !noisyChange.IsSignificant,
+    "Continuous analog-like noise must remain visible but receive low priority.");
+
+var emptyTrcError = CaptureException(() => PcanTrcCodec.Parse(new[] { "; only header", "unknown" }));
+Require(emptyTrcError is FormatException && emptyTrcError.Message.Contains("не содержит"),
+    "Empty/invalid TRC must produce a clear format error.");
 
 var onkTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-{Guid.NewGuid():N}.csv");
 var canTemporaryFile = Path.Combine(Path.GetTempPath(), $"classical-can-{Guid.NewGuid():N}.csv");
@@ -250,4 +323,34 @@ static IReadOnlyList<string> ParseSemicolonCsvLine(string line)
 
     columns.Add(value.ToString());
     return columns;
+}
+
+static IReadOnlyList<CanFrame> CreateClassicalFrames(
+    DateTimeOffset start,
+    uint id,
+    bool isExtended,
+    int count,
+    Func<int, byte[]> dataFactory) =>
+    Enumerable.Range(0, count).Select(index => new CanFrame
+    {
+        Timestamp = start.AddMilliseconds(index * 10),
+        Channel = 0,
+        Id = id,
+        IsExtended = isExtended,
+        Data = dataFactory(index),
+        Protocol = BusProtocol.ClassicalCan,
+        Direction = CanDirection.Rx
+    }).ToArray();
+
+static Exception? CaptureException(Action action)
+{
+    try
+    {
+        action();
+        return null;
+    }
+    catch (Exception exception)
+    {
+        return exception;
+    }
 }

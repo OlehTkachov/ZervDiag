@@ -4,12 +4,12 @@ namespace CraneCAN.Core.Analysis;
 
 public sealed class FrameStatisticsAggregator
 {
-    private readonly Dictionary<uint, MutableStatistics> _statistics = [];
+    private readonly Dictionary<(BusProtocol Protocol, uint Id, bool IsExtended), MutableStatistics> _statistics = [];
 
     public void Add(CanFrame frame)
     {
         frame.Validate();
-        var key = frame.Id;
+        var key = (frame.Protocol, frame.Id, frame.IsExtended);
         if (!_statistics.TryGetValue(key, out var value))
         {
             _statistics[key] = new MutableStatistics(frame);
@@ -20,7 +20,8 @@ public sealed class FrameStatisticsAggregator
     }
 
     public IReadOnlyList<FrameStatistics> Snapshot() => _statistics
-        .OrderBy(pair => pair.Key)
+        .OrderBy(pair => pair.Key.Id)
+        .ThenBy(pair => pair.Key.IsExtended)
         .Select(pair => pair.Value.ToImmutable())
         .ToArray();
 
@@ -28,7 +29,10 @@ public sealed class FrameStatisticsAggregator
 
     private sealed class MutableStatistics
     {
+        private readonly BusProtocol _protocol;
         private readonly uint _id;
+        private readonly bool _isExtended;
+        private readonly SortedSet<int> _dlcValues = [];
         private double _periodTotal;
         private long _periodCount;
         private double? _minimumPeriod;
@@ -36,15 +40,16 @@ public sealed class FrameStatisticsAggregator
 
         public MutableStatistics(CanFrame first)
         {
+            _protocol = first.Protocol;
             _id = first.Id;
+            _isExtended = first.IsExtended;
             Count = 1;
-            Dlc = first.Dlc;
+            _dlcValues.Add(first.Dlc);
             FirstSeen = first.Timestamp;
             LastSeen = first.Timestamp;
         }
 
         public long Count { get; private set; }
-        public int Dlc { get; private set; }
         public DateTimeOffset FirstSeen { get; }
         public DateTimeOffset LastSeen { get; private set; }
 
@@ -64,14 +69,16 @@ public sealed class FrameStatisticsAggregator
             }
 
             Count++;
-            Dlc = frame.Dlc;
+            _dlcValues.Add(frame.Dlc);
             LastSeen = frame.Timestamp;
         }
 
         public FrameStatistics ToImmutable() => new(
-            _id.ToString("X2"),
+            _protocol,
+            _id,
+            _isExtended,
             Count,
-            Dlc,
+            string.Join("/", _dlcValues),
             _periodCount == 0 ? null : _periodTotal / _periodCount,
             _minimumPeriod,
             _maximumPeriod,

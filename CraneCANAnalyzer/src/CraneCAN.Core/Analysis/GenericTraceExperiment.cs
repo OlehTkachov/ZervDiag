@@ -65,11 +65,15 @@ public static class GenericTraceExperiment
 
         if (reference.Length == 0)
         {
-            throw new InvalidOperationException("Reference interval contains no comparable Rx Classical CAN frames.");
+            throw new InvalidOperationException(
+                "В выбранном окне REFERENCE нет обычных Rx-кадров Classical CAN. " +
+                "Проверьте границы времени и содержимое TRC.");
         }
         if (action.Length == 0)
         {
-            throw new InvalidOperationException("Action interval contains no comparable Rx Classical CAN frames.");
+            throw new InvalidOperationException(
+                "В выбранном окне ACTION нет обычных Rx-кадров Classical CAN. " +
+                "Проверьте границы времени и содержимое TRC.");
         }
 
         var comparisons = GenericExperimentComparator.Compare(reference, action);

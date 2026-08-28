@@ -3,116 +3,215 @@ using CraneCAN.Core.Models;
 
 namespace CraneCAN.Core.Storage;
 
+public sealed record PcanTrcImportResult(
+    IReadOnlyList<CanFrame> Frames,
+    int TotalLines,
+    int HeaderAndCommentLines,
+    int RemoteFramesSkipped,
+    int ErrorFramesSkipped,
+    int UnknownOrMalformedLines)
+{
+    public int SkippedLines =>
+        HeaderAndCommentLines + RemoteFramesSkipped + ErrorFramesSkipped + UnknownOrMalformedLines;
+}
+
 /// <summary>
-/// Tolerant reader for classic PCAN-View text trace files (.trc).
-/// It intentionally ignores comments, status/error lines and any record that
-/// cannot be identified as a normal Rx/Tx data frame. Both 11-bit and 29-bit
-/// identifiers are preserved.
+/// Tolerant, order-preserving reader for PCAN-View Classical CAN trace files.
+/// PCAN trace headers, comments, RTR frames, error/status records and unknown
+/// lines are counted and skipped without terminating the import.
 /// </summary>
 public static class PcanTrcCodec
 {
     public static async Task<IReadOnlyList<CanFrame>> LoadAsync(
         string path,
         int defaultChannel = 0,
+        CancellationToken cancellationToken = default) =>
+        (await LoadWithDiagnosticsAsync(path, defaultChannel, cancellationToken).ConfigureAwait(false)).Frames;
+
+    public static async Task<PcanTrcImportResult> LoadWithDiagnosticsAsync(
+        string path,
+        int defaultChannel = 0,
         CancellationToken cancellationToken = default)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        ValidateChannel(defaultChannel);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new ArgumentException("Путь к TRC-файлу не задан.", nameof(path));
+        }
+
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite,
+            bufferSize: 64 * 1024,
+            options: FileOptions.SequentialScan);
         using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
-        var lines = new List<string>();
+        var parser = new ParserState(defaultChannel);
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
         {
-            lines.Add(line);
+            cancellationToken.ThrowIfCancellationRequested();
+            parser.Process(line);
         }
 
-        return Parse(lines, defaultChannel);
+        return parser.Complete();
     }
 
-    public static IReadOnlyList<CanFrame> Parse(IEnumerable<string> lines, int defaultChannel = 0)
+    public static IReadOnlyList<CanFrame> Parse(IEnumerable<string> lines, int defaultChannel = 0) =>
+        ParseWithDiagnostics(lines, defaultChannel).Frames;
+
+    public static PcanTrcImportResult ParseWithDiagnostics(
+        IEnumerable<string> lines,
+        int defaultChannel = 0)
     {
         ArgumentNullException.ThrowIfNull(lines);
-        if (defaultChannel < 0)
+        ValidateChannel(defaultChannel);
+        var parser = new ParserState(defaultChannel);
+        foreach (var line in lines)
         {
-            throw new ArgumentOutOfRangeException(nameof(defaultChannel));
+            parser.Process(line);
         }
 
-        var result = new List<CanFrame>();
-        var start = DateTimeOffset.UnixEpoch;
-        var haveStart = false;
+        return parser.Complete();
+    }
 
-        foreach (var sourceLine in lines)
+    private static void ValidateChannel(int channel)
+    {
+        if (channel < 0)
         {
-            var line = sourceLine.Trim();
+            throw new ArgumentOutOfRangeException(nameof(channel));
+        }
+    }
+
+    private sealed class ParserState
+    {
+        private readonly int _defaultChannel;
+        private readonly List<CanFrame> _frames = [];
+        private DateTimeOffset _start = DateTimeOffset.UnixEpoch;
+        private bool _haveStart;
+
+        public ParserState(int defaultChannel) => _defaultChannel = defaultChannel;
+
+        public int TotalLines { get; private set; }
+        public int HeaderAndCommentLines { get; private set; }
+        public int RemoteFramesSkipped { get; private set; }
+        public int ErrorFramesSkipped { get; private set; }
+        public int UnknownOrMalformedLines { get; private set; }
+
+        public void Process(string? sourceLine)
+        {
+            TotalLines++;
+            var line = (sourceLine ?? string.Empty).Trim();
             if (line.Length == 0)
             {
-                continue;
+                HeaderAndCommentLines++;
+                return;
             }
 
-            if (line.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase))
+            if (line.StartsWith(";$STARTTIME=", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("$STARTTIME=", StringComparison.OrdinalIgnoreCase))
             {
-                var value = line[(line.IndexOf('=') + 1)..].Trim();
-                if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
-                {
-                    try
-                    {
-                        var dt = DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Local);
-                        start = new DateTimeOffset(dt).ToUniversalTime();
-                        haveStart = true;
-                    }
-                    catch (ArgumentException)
-                    {
-                    }
-                }
-                continue;
+                TrySetStartTime(line);
+                HeaderAndCommentLines++;
+                return;
             }
 
-            if (line[0] == ';' || line[0] == '$')
+            if (line[0] is ';' or '$')
             {
-                continue;
+                HeaderAndCommentLines++;
+                return;
             }
 
             var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (!TryFindDirection(tokens, out var directionIndex, out var direction))
+            if (IsErrorOrStatusRecord(tokens, line))
             {
-                continue;
+                ErrorFramesSkipped++;
+                return;
             }
 
-            if (!TryFindId(tokens, directionIndex, out var idIndex, out var id))
+            if (IsRemoteRecord(tokens))
             {
-                continue;
+                RemoteFramesSkipped++;
+                return;
             }
 
-            if (!TryFindDlcAndData(tokens, directionIndex, idIndex, out var data))
+            if (!TryFindDirection(tokens, out var directionIndex, out var direction) ||
+                !TryFindIdDlcAndData(tokens, directionIndex, out var id, out var isExtended, out var data))
             {
-                continue;
+                UnknownOrMalformedLines++;
+                return;
             }
 
             var offsetMs = TryFindOffsetMilliseconds(tokens, directionIndex, out var parsedOffset)
                 ? parsedOffset
-                : result.Count;
-            var timestamp = (haveStart ? start : DateTimeOffset.UnixEpoch).AddMilliseconds(offsetMs);
-            var isExtended = id > 0x7FF;
-
+                : _frames.Count;
+            var timestamp = (_haveStart ? _start : DateTimeOffset.UnixEpoch).AddMilliseconds(offsetMs);
             var frame = new CanFrame
             {
                 Timestamp = timestamp,
-                Channel = defaultChannel,
+                Channel = _defaultChannel,
                 Id = id,
                 Data = data,
                 Protocol = BusProtocol.ClassicalCan,
                 Direction = direction,
                 IsExtended = isExtended
             };
-            frame.Validate();
-            result.Add(frame);
+
+            try
+            {
+                frame.Validate();
+                _frames.Add(frame);
+            }
+            catch (ArgumentException)
+            {
+                UnknownOrMalformedLines++;
+            }
         }
 
-        if (result.Count == 0)
+        public PcanTrcImportResult Complete()
         {
-            throw new FormatException("В TRC не найдено ни одного обычного CAN-кадра Rx/Tx.");
+            if (_frames.Count == 0)
+            {
+                throw new FormatException(
+                    "TRC-файл не содержит обычных кадров Classical CAN с данными. " +
+                    "Комментарии, RTR, error/status и повреждённые строки были пропущены.");
+            }
+
+            return new PcanTrcImportResult(
+                _frames,
+                TotalLines,
+                HeaderAndCommentLines,
+                RemoteFramesSkipped,
+                ErrorFramesSkipped,
+                UnknownOrMalformedLines);
         }
 
-        return result;
+        private void TrySetStartTime(string line)
+        {
+            var separator = line.IndexOf('=');
+            if (separator < 0)
+            {
+                return;
+            }
+
+            var value = line[(separator + 1)..].Trim();
+            if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var oaDate))
+            {
+                return;
+            }
+
+            try
+            {
+                var local = DateTime.SpecifyKind(DateTime.FromOADate(oaDate), DateTimeKind.Local);
+                _start = new DateTimeOffset(local).ToUniversalTime();
+                _haveStart = true;
+            }
+            catch (ArgumentException)
+            {
+                // Invalid metadata must not discard otherwise valid CAN frames.
+            }
+        }
     }
 
     private static bool TryFindDirection(
@@ -128,6 +227,7 @@ public static class PcanTrcCodec
                 direction = CanDirection.Rx;
                 return true;
             }
+
             if (tokens[index].Equals("Tx", StringComparison.OrdinalIgnoreCase))
             {
                 directionIndex = index;
@@ -141,53 +241,65 @@ public static class PcanTrcCodec
         return false;
     }
 
-    private static bool TryFindId(
+    private static bool TryFindIdDlcAndData(
         IReadOnlyList<string> tokens,
         int directionIndex,
-        out int idIndex,
-        out uint id)
+        out uint id,
+        out bool isExtended,
+        out byte[] data)
     {
-        // Common PCAN-View 1.x layout: number, time, Rx/Tx, ID, DLC, data...
-        for (var index = directionIndex + 1; index < Math.Min(tokens.Count, directionIndex + 4); index++)
+        // PCAN 1.x: number, offset, Rx/Tx, ID, DLC, DATA.
+        // PCAN 2.x: number, offset, type, bus, ID, Rx/Tx, [reserved], DLC, DATA.
+        // Checking the adjacent fields first prevents DATA[0] from being mistaken for an ID.
+        var candidates = new[]
         {
-            if (TryParseCanId(tokens[index], out id))
+            directionIndex + 1,
+            directionIndex - 1,
+            directionIndex + 2,
+            directionIndex - 2,
+            directionIndex + 3,
+            directionIndex - 3
+        };
+
+        foreach (var idIndex in candidates.Where(index => index >= 0 && index < tokens.Count).Distinct())
+        {
+            if (!TryParseCanId(tokens[idIndex], out var candidateId, out var explicitExtended))
             {
-                idIndex = index;
-                return true;
+                continue;
             }
+
+            var dlcSearchStart = Math.Max(directionIndex, idIndex) + 1;
+            if (!TryFindDlcAndData(tokens, dlcSearchStart, out var candidateData))
+            {
+                continue;
+            }
+
+            id = candidateId;
+            isExtended = explicitExtended || candidateId > 0x7FF;
+            data = candidateData;
+            return true;
         }
 
-        // Some trace layouts put ID before Rx/Tx.
-        for (var index = directionIndex - 1; index >= Math.Max(0, directionIndex - 4); index--)
-        {
-            if (TryParseCanId(tokens[index], out id))
-            {
-                idIndex = index;
-                return true;
-            }
-        }
-
-        idIndex = -1;
         id = 0;
+        isExtended = false;
+        data = [];
         return false;
     }
 
-    private static bool TryParseCanId(string token, out uint id)
+    private static bool TryParseCanId(string token, out uint id, out bool explicitExtended)
     {
-        var value = token.Trim().TrimEnd('h', 'H');
+        var value = token.Trim();
+        explicitExtended = value.EndsWith('x') || value.EndsWith('X');
+        value = value.TrimEnd('h', 'H', 'x', 'X');
         if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
             value = value[2..];
         }
 
-        if (value.Length is < 2 or > 8 || !value.All(Uri.IsHexDigit))
+        if (value.Length is < 2 or > 8 || !value.All(Uri.IsHexDigit) ||
+            !uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out id))
         {
             id = 0;
-            return false;
-        }
-
-        if (!uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out id))
-        {
             return false;
         }
 
@@ -196,20 +308,15 @@ public static class PcanTrcCodec
 
     private static bool TryFindDlcAndData(
         IReadOnlyList<string> tokens,
-        int directionIndex,
-        int idIndex,
+        int searchStart,
         out byte[] data)
     {
-        var startIndex = Math.Max(directionIndex, idIndex) + 1;
-        for (var index = startIndex; index < tokens.Count; index++)
+        var searchEnd = Math.Min(tokens.Count, searchStart + 3);
+        for (var index = searchStart; index < searchEnd; index++)
         {
             if (!int.TryParse(tokens[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var dlc) ||
-                dlc is < 0 or > 8)
-            {
-                continue;
-            }
-
-            if (tokens.Count - index - 1 < dlc)
+                dlc is < 0 or > 8 ||
+                tokens.Count - index - 1 < dlc)
             {
                 continue;
             }
@@ -218,14 +325,7 @@ public static class PcanTrcCodec
             var valid = true;
             for (var byteIndex = 0; byteIndex < dlc; byteIndex++)
             {
-                var token = tokens[index + 1 + byteIndex].Trim().TrimEnd('h', 'H');
-                if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                {
-                    token = token[2..];
-                }
-
-                if (token.Length > 2 ||
-                    !byte.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[byteIndex]))
+                if (!TryParseByte(tokens[index + 1 + byteIndex], out bytes[byteIndex]))
                 {
                     valid = false;
                     break;
@@ -243,16 +343,39 @@ public static class PcanTrcCodec
         return false;
     }
 
+    private static bool TryParseByte(string source, out byte value)
+    {
+        var token = source.Trim().TrimEnd('h', 'H');
+        if (token.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            token = token[2..];
+        }
+
+        value = 0;
+        return token.Length is 1 or 2 &&
+               byte.TryParse(token, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
+    }
+
     private static bool TryFindOffsetMilliseconds(
         IReadOnlyList<string> tokens,
         int directionIndex,
         out double milliseconds)
     {
-        for (var index = 0; index < directionIndex; index++)
+        var startIndex = LooksLikeMessageNumber(tokens[0]) ? 1 : 0;
+        for (var index = startIndex; index < directionIndex; index++)
         {
-            var token = tokens[index].TrimEnd(')', ':');
-            if (token.Contains('.') &&
-                double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out milliseconds) &&
+            var token = tokens[index].Trim().TrimEnd(')', ':');
+            if (token.EndsWith("ms", StringComparison.OrdinalIgnoreCase))
+            {
+                token = token[..^2];
+            }
+
+            if (!token.Contains('.') && token.Contains(','))
+            {
+                token = token.Replace(',', '.');
+            }
+
+            if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out milliseconds) &&
                 milliseconds >= 0)
             {
                 return true;
@@ -262,4 +385,26 @@ public static class PcanTrcCodec
         milliseconds = 0;
         return false;
     }
+
+    private static bool LooksLikeMessageNumber(string token)
+    {
+        var value = token.Trim();
+        if (value.EndsWith(')'))
+        {
+            value = value[..^1];
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+        }
+
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+    }
+
+    private static bool IsRemoteRecord(IEnumerable<string> tokens) => tokens.Any(token =>
+        token.Equals("RTR", StringComparison.OrdinalIgnoreCase) ||
+        token.Equals("REMOTE", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsErrorOrStatusRecord(IEnumerable<string> tokens, string line) =>
+        line.Contains("Error Frame", StringComparison.OrdinalIgnoreCase) ||
+        tokens.Any(token =>
+            token.Equals("ER", StringComparison.OrdinalIgnoreCase) ||
+            token.Equals("STATUS", StringComparison.OrdinalIgnoreCase));
 }
