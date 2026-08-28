@@ -1,0 +1,75 @@
+{
+  "capturedOn": "2026-08-25",
+  "physicalLayer": "TJA1050 differential bus",
+  "transport": {
+    "kind": "asynchronous serial, not CAN 2.0",
+    "baud": 38400,
+    "dataBits": 8,
+    "parity": "even",
+    "stopBits": 1,
+    "bitOrder": "lsb-first"
+  },
+  "packetChecksum": {
+    "rule": "sum(all packet bytes) modulo 256 equals 255",
+    "formula": "checksum = 0xFF - (sum(payload bytes) & 0xFF)"
+  },
+  "knownFields": [
+    {
+      "packet": "E6",
+      "bytes": "1..2",
+      "encoding": "uint16 little-endian",
+      "observations": {
+        "0x0035": "normal captured value",
+        "0x8000": "E31 rod-side pressure sensor fault"
+      }
+    },
+    {
+      "packet": "F7",
+      "byte": 1,
+      "mask": "0x80",
+      "observations": {
+        "set": "hook hoist limit normal",
+        "clear": "E83 hook hoist limit active/open"
+      }
+    }
+  ],
+  "captures": [
+    {
+      "file": "captures/onk160_healthy_no_errors.csv",
+      "condition": "healthy, no errors",
+      "packets": [
+        "CA 6B 01 4B 11 6D",
+        "E6 35 00 E4",
+        "E5 79 00 A1",
+        "E8 B2 09 39 00 B5 FF 00 00 FD 00 69 02 41 C6",
+        "F7 81 87"
+      ]
+    },
+    {
+      "file": "captures/onk160_e55_kos_disconnected.csv",
+      "condition": "E55, boom-head controller disconnected",
+      "packets": [
+        "CA 07 00 48 11 D5",
+        "E6 35 00 E4",
+        "E5 79 00 A1",
+        "E8 B3 09 34 00 D2 FF 00 00 FD 00 69 02 41 AD",
+        "F7 10 F8",
+        "2A"
+      ]
+    },
+    {
+      "file": "captures/onk160_e55_e31_rod_sensor_fault.csv",
+      "condition": "E55 plus E31 rod-side pressure sensor fault",
+      "keyChange": "E6 35 00 E4 -> E6 00 80 99"
+    },
+    {
+      "file": "captures/onk160_e83_hook_limit.csv",
+      "condition": "E83 hook hoist limit active",
+      "keyChange": "F7 81 87 -> F7 01 07"
+    },
+    {
+      "file": "captures/onk160_uart_bit_25msa.csv",
+      "condition": "25 MSa/s high-resolution UART bit timing proof"
+    }
+  ]
+}

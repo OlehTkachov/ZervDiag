@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CraneCAN.ONK160.Test</AssemblyName>
+    <RootNamespace>CraneCAN.App</RootNamespace>
+    <Version>0.4.1</Version>
+    <AssemblyVersion>0.4.1.0</AssemblyVersion>
+    <FileVersion>0.4.1.0</FileVersion>
+    <Product>CraneCAN ONK-160 Test</Product>
+    <Description>Пассивный тестовый анализатор ОНК-160 со стендовым сравнением состояний.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CraneCAN.Core\CraneCAN.Core.csproj" />
+    <ProjectReference Include="..\CraneCAN.Driver.Onk160\CraneCAN.Driver.Onk160.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\README.md">
+      <Link>README.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>README.md</TargetPath>
+    </Content>
+    <Content Include="..\..\docs\ONK160_UART_ADAPTER.md">
+      <Link>docs\ONK160_UART_ADAPTER.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\ONK160_UART_ADAPTER.md</TargetPath>
+    </Content>
+  </ItemGroup>
+</Project>
