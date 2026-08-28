@@ -35,5 +35,11 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>docs\SOOSAN_FIELD_CAPTURE.md</TargetPath>
     </Content>
+    <Content Include="..\..\tests\CraneCAN.SmokeTests\Fixtures\soosan_mixed.trc">
+      <Link>samples\soosan_mixed.trc</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>samples\soosan_mixed.trc</TargetPath>
+    </Content>
   </ItemGroup>
 </Project>

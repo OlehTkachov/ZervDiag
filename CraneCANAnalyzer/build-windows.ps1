@@ -7,6 +7,7 @@ $publishDirectory = Join-Path $projectRoot "publish\soosan-field-win-x64"
 $publishedExe = Join-Path $publishDirectory "CraneCAN.Field.exe"
 $publishedReadme = Join-Path $publishDirectory "README.md"
 $publishedFieldGuide = Join-Path $publishDirectory "docs\SOOSAN_FIELD_CAPTURE.md"
+$publishedFixture = Join-Path $publishDirectory "samples\soosan_mixed.trc"
 
 function Assert-DotNetSuccess([string]$step) {
     if ($LASTEXITCODE -ne 0) {
@@ -64,6 +65,9 @@ if (-not (Test-Path -LiteralPath $publishedReadme)) {
 }
 if (-not (Test-Path -LiteralPath $publishedFieldGuide)) {
     throw "SOOSAN field guide was not copied to the publish directory: $publishedFieldGuide"
+}
+if (-not (Test-Path -LiteralPath $publishedFixture)) {
+    throw "SOOSAN control TRC was not copied to the publish directory: $publishedFixture"
 }
 
 $hash = (Get-FileHash -LiteralPath $publishedExe -Algorithm SHA256).Hash.ToLowerInvariant()
