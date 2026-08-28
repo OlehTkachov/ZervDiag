@@ -13,6 +13,11 @@
     <FileVersion>0.5.0.0</FileVersion>
     <Product>CraneCAN Field — SOOSAN JK1200A</Product>
     <Description>Полевой offline-анализатор Classical CAN трасс PCAN-View.</Description>
+    <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CraneCAN.Core\CraneCAN.Core.csproj" />
