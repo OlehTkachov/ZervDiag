@@ -6,17 +6,16 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>CraneCAN.ONK160.Test</AssemblyName>
+    <AssemblyName>CraneCAN.Field</AssemblyName>
     <RootNamespace>CraneCAN.App</RootNamespace>
-    <Version>0.4.1</Version>
-    <AssemblyVersion>0.4.1.0</AssemblyVersion>
-    <FileVersion>0.4.1.0</FileVersion>
-    <Product>CraneCAN ONK-160 Test</Product>
-    <Description>Пассивный тестовый анализатор ОНК-160 со стендовым сравнением состояний.</Description>
+    <Version>0.5.0</Version>
+    <AssemblyVersion>0.5.0.0</AssemblyVersion>
+    <FileVersion>0.5.0.0</FileVersion>
+    <Product>CraneCAN Field — SOOSAN JK1200A</Product>
+    <Description>Полевой offline-анализатор Classical CAN трасс PCAN-View.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\CraneCAN.Core\CraneCAN.Core.csproj" />
-    <ProjectReference Include="..\CraneCAN.Driver.Onk160\CraneCAN.Driver.Onk160.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\README.md">
@@ -25,11 +24,11 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>README.md</TargetPath>
     </Content>
-    <Content Include="..\..\docs\ONK160_UART_ADAPTER.md">
-      <Link>docs\ONK160_UART_ADAPTER.md</Link>
+    <Content Include="..\..\docs\SOOSAN_FIELD_CAPTURE.md">
+      <Link>docs\SOOSAN_FIELD_CAPTURE.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
-      <TargetPath>docs\ONK160_UART_ADAPTER.md</TargetPath>
+      <TargetPath>docs\SOOSAN_FIELD_CAPTURE.md</TargetPath>
     </Content>
   </ItemGroup>
 </Project>

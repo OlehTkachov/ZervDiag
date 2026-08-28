@@ -50,6 +50,22 @@ public static class GenericTraceExperiment
         actionWindow.Validate();
         var frames = await PcanTrcCodec.LoadAsync(trcPath, channel, cancellationToken)
             .ConfigureAwait(false);
+        return CompareWindows(frames, referenceWindow, actionWindow);
+    }
+
+    public static GenericTraceExperimentResult CompareWindows(
+        IReadOnlyList<CanFrame> frames,
+        TraceWindow referenceWindow,
+        TraceWindow actionWindow)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+        if (frames.Count == 0)
+        {
+            throw new InvalidOperationException("Трасса не содержит кадров для выбора временных окон.");
+        }
+
+        referenceWindow.Validate();
+        actionWindow.Validate();
         var origin = frames.Min(frame => frame.Timestamp);
         var reference = SelectWindow(frames, origin, referenceWindow);
         var action = SelectWindow(frames, origin, actionWindow);
