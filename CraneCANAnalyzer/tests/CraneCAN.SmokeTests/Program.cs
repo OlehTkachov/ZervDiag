@@ -381,6 +381,35 @@ var overlappingQuality = ExperimentQualityAnalyzer.Evaluate(
 Require(!overlappingQuality.CanAnalyze && overlappingQuality.Issues.Any(issue =>
         issue.Code == ExperimentQualityCode.OverlappingWindows),
     "Overlapping windows must make a guided experiment invalid.");
+var differentBusQuality = ExperimentQualityAnalyzer.Evaluate(
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        guidedReference,
+        guidedAction,
+        ReferenceBus: "CAN1",
+        ActionBus: "CAN2")
+]);
+Require(!differentBusQuality.CanAnalyze && differentBusQuality.Issues.Any(issue =>
+        issue.Code == ExperimentQualityCode.DifferentBuses),
+    "REFERENCE and ACTION from different CAN buses must not be compared silently.");
+var swappedWindowQuality = ExperimentQualityAnalyzer.Evaluate(
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        guidedReference,
+        guidedAction,
+        ReferenceWindow: new TraceWindow(200, 300),
+        ActionWindow: new TraceWindow(0, 100),
+        ReferencePath: "same.trc",
+        ActionPath: "same.trc")
+]);
+Require(swappedWindowQuality.CanAnalyze && swappedWindowQuality.Issues.Any(issue =>
+        issue.Code == ExperimentQualityCode.ReferenceAfterAction &&
+        issue.Severity == ExperimentQualitySeverity.Warning),
+    "A possible REFERENCE/ACTION swap must remain analyzable but show a warning.");
 var emptyReferenceQuality = ExperimentQualityAnalyzer.Evaluate(
 [
     new GuidedExperimentRun(1, "CAN1", [], guidedAction)

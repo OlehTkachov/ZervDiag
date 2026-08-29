@@ -12,6 +12,7 @@ public static class GuidedDiagnosticsText
         ExperimentQualityCode.TooFewReferenceFrames => "в REFERENCE слишком мало кадров",
         ExperimentQualityCode.TooFewActionFrames => "в ACTION слишком мало кадров",
         ExperimentQualityCode.OverlappingWindows => "окна REFERENCE и ACTION пересекаются",
+        ExperimentQualityCode.ReferenceAfterAction => "REFERENCE расположен после ACTION — проверьте, не перепутаны ли состояния",
         ExperimentQualityCode.DifferentBuses => "сравниваются разные CAN buses",
         ExperimentQualityCode.EventNotDetected => "чёткий момент действия не обнаружен",
         ExperimentQualityCode.EventBoundaryUnclear => "момент действия определён неоднозначно",

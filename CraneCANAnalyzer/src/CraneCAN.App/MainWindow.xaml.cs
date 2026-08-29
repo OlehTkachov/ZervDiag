@@ -516,7 +516,9 @@ public partial class MainWindow : Window
             ReferenceWindow: referenceWindow,
             ActionWindow: actionWindow,
             ReferencePath: _loadedTrcPath,
-            ActionPath: _loadedTrcPath);
+            ActionPath: _loadedTrcPath,
+            ReferenceBus: bus,
+            ActionBus: bus);
         return (run, definition);
     }
 
@@ -794,7 +796,9 @@ public partial class MainWindow : Window
             ReferenceWindow: definition.ReferenceSource.Window,
             ActionWindow: definition.ActionSource.Window,
             ReferencePath: definition.ReferenceSource.Path,
-            ActionPath: definition.ActionSource.Path);
+            ActionPath: definition.ActionSource.Path,
+            ReferenceBus: definition.ReferenceSource.Bus,
+            ActionBus: definition.ActionSource.Bus);
     }
 
     private void ApplyProfileToFields()

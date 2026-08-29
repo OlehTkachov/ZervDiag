@@ -56,6 +56,14 @@ public static class ExperimentQualityAnalyzer
                     ExperimentQualityCode.DifferentBuses, ExperimentQualitySeverity.Error, run.RepeatNumber));
             }
 
+            if (!string.IsNullOrWhiteSpace(run.ReferenceBus) &&
+                !string.IsNullOrWhiteSpace(run.ActionBus) &&
+                !string.Equals(run.ReferenceBus, run.ActionBus, StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add(new ExperimentQualityIssue(
+                    ExperimentQualityCode.DifferentBuses, ExperimentQualitySeverity.Error, run.RepeatNumber));
+            }
+
             if (run.ReferencePath is not null && run.ActionPath is not null &&
                 string.Equals(run.ReferencePath, run.ActionPath, StringComparison.OrdinalIgnoreCase) &&
                 run.ReferenceWindow is not null && run.ActionWindow is not null &&
@@ -63,6 +71,15 @@ public static class ExperimentQualityAnalyzer
             {
                 issues.Add(new ExperimentQualityIssue(
                     ExperimentQualityCode.OverlappingWindows, ExperimentQualitySeverity.Error, run.RepeatNumber));
+            }
+
+            else if (run.ReferencePath is not null && run.ActionPath is not null &&
+                     string.Equals(run.ReferencePath, run.ActionPath, StringComparison.OrdinalIgnoreCase) &&
+                     run.ReferenceWindow is not null && run.ActionWindow is not null &&
+                     run.ReferenceWindow.StartMilliseconds > run.ActionWindow.StartMilliseconds)
+            {
+                issues.Add(new ExperimentQualityIssue(
+                    ExperimentQualityCode.ReferenceAfterAction, ExperimentQualitySeverity.Warning, run.RepeatNumber));
             }
         }
 

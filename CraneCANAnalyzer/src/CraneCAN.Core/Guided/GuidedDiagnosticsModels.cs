@@ -83,7 +83,9 @@ public sealed record GuidedExperimentRun(
     TraceWindow? ReferenceWindow = null,
     TraceWindow? ActionWindow = null,
     string? ReferencePath = null,
-    string? ActionPath = null);
+    string? ActionPath = null,
+    string? ReferenceBus = null,
+    string? ActionBus = null);
 
 public enum ExperimentQualitySeverity
 {
@@ -102,6 +104,7 @@ public enum ExperimentQualityCode
     TooFewReferenceFrames,
     TooFewActionFrames,
     OverlappingWindows,
+    ReferenceAfterAction,
     DifferentBuses,
     EventNotDetected,
     EventBoundaryUnclear,
