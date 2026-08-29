@@ -2,9 +2,12 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Data;
 using CraneCAN.Core.Analysis;
+using CraneCAN.Core.Guided;
 using CraneCAN.Core.Models;
+using CraneCAN.Core.Profiles;
 using CraneCAN.Core.Storage;
 using Microsoft.Win32;
 
@@ -20,6 +23,11 @@ public partial class MainWindow : Window
     private string? _actionTrcPath;
     private int _referenceFrameCount;
     private int _actionFrameCount;
+    private readonly List<GuidedExperimentRun> _guidedRuns = [];
+    private readonly List<GuidedExperimentRepeat> _guidedRepeatDefinitions = [];
+    private IReadOnlyList<GuidedCandidate> _guidedCandidates = [];
+    private MachineProfile _machineProfile = new();
+    private string? _machineProfilePath;
 
     public MainWindow()
     {
@@ -29,6 +37,22 @@ public partial class MainWindow : Window
         FramesGrid.ItemsSource = _frameRows;
         StatisticsGrid.ItemsSource = Array.Empty<FrameStatistics>();
         ComparisonGrid.ItemsSource = Array.Empty<GenericCanComparisonRow>();
+        GuidedCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
+        GuidedActionTypeCombo.ItemsSource = new[]
+        {
+            "сигнал кнопки", "сигнал джойстика", "состояние концевика", "состояние датчика",
+            "разрешение", "блокировка", "команда реле", "команда клапана", "выход контроллера",
+            "сигнал режима", "источник неисправности", "сравнение двух состояний", "пользовательское действие"
+        };
+        GuidedActionTypeCombo.SelectedIndex = 1;
+        ProfileStatusCombo.ItemsSource = new[]
+        {
+            SignalKnowledgeState.Candidate,
+            SignalKnowledgeState.Probable,
+            SignalKnowledgeState.Confirmed
+        };
+        ProfileStatusCombo.SelectedIndex = 0;
+        ApplyProfileToFields();
         LoadFieldGuide();
     }
 
@@ -118,6 +142,11 @@ public partial class MainWindow : Window
         ReferenceEndTextBox.Text = FormatMilliseconds(referenceEnd);
         ActionStartTextBox.Text = FormatMilliseconds(referenceEnd);
         ActionEndTextBox.Text = FormatMilliseconds(duration + 0.001);
+        GuidedReferenceStartTextBox.Text = "0";
+        GuidedReferenceEndTextBox.Text = FormatMilliseconds(referenceEnd);
+        GuidedActionStartTextBox.Text = FormatMilliseconds(referenceEnd);
+        GuidedActionEndTextBox.Text = FormatMilliseconds(duration + 0.001);
+        GuidedApproximateTimeTextBox.Text = FormatMilliseconds(referenceEnd);
     }
 
     private void FrameFilter_Changed(object sender, EventArgs e) => ApplyFrameFilter();
@@ -180,11 +209,18 @@ public partial class MainWindow : Window
         _loadedTrcPath = null;
         _referenceFrameCount = 0;
         _actionFrameCount = 0;
+        _guidedRuns.Clear();
+        _guidedRepeatDefinitions.Clear();
+        _guidedCandidates = [];
         FramesGrid.ItemsSource = _frameRows;
         StatisticsGrid.ItemsSource = Array.Empty<FrameStatistics>();
         ComparisonGrid.ItemsSource = Array.Empty<GenericCanComparisonRow>();
+        GuidedCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
         LoadedFileText.Text = "TRC не открыт";
         ComparisonSummaryText.Text = "Сравнение ещё не выполнено.";
+        GuidedRepeatsText.Text = "Повторы ещё не добавлены.";
+        GuidedQualityText.Text = "Качество эксперимента ещё не оценено.";
+        GuidedCandidateDetailsText.Text = "Выберите кандидата, чтобы увидеть прозрачное объяснение score.";
         SaveComparisonButton.IsEnabled = false;
         FrameCountText.Text = "Кадров: 0";
         StatusText.Text = "Offline-анализ TRC. Передача CAN архитектурно отсутствует.";
@@ -316,7 +352,7 @@ public partial class MainWindow : Window
         var dialog = new SaveFileDialog
         {
             Filter = "Отчёт сравнения CSV (*.csv)|*.csv",
-            FileName = $"CraneCAN_SOOSAN_comparison_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
+            FileName = $"CraneCAN_comparison_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
         };
         if (dialog.ShowDialog(this) != true)
         {
@@ -365,12 +401,441 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AddGuidedRepeatButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var (run, definition) = CreateCurrentGuidedRepeat(_guidedRuns.Count + 1);
+            _guidedRuns.Add(run);
+            _guidedRepeatDefinitions.Add(definition);
+            GuidedRepeatsText.Text = $"Добавлено повторов: {_guidedRuns.Count}. " +
+                                     "Один случай не считается подтверждением; рекомендуется 3 повтора.";
+            GuidedQualityText.Text = "Нажмите «АНАЛИЗИРОВАТЬ» или откройте следующий TRC и добавьте ещё один повтор.";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка добавления повтора",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void AnalyzeGuidedButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_guidedRuns.Count == 0)
+            {
+                var (run, definition) = CreateCurrentGuidedRepeat(1);
+                _guidedRuns.Add(run);
+                _guidedRepeatDefinitions.Add(definition);
+                GuidedRepeatsText.Text = "Добавлен повтор 1/1. Для подтверждения сигнала выполните дополнительные опыты.";
+            }
+
+            var actionName = GuidedActionNameTextBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(actionName))
+            {
+                throw new InvalidOperationException("Введите понятное название физического действия.");
+            }
+
+            SetBusy(true, "Анализ переходов и повторяемости…");
+            var result = await Task.Run(() => GuidedDiagnosticsAnalyzer.Analyze(actionName, _guidedRuns));
+            _guidedCandidates = result.Candidates;
+            GuidedCandidatesGrid.ItemsSource = result.Candidates
+                .Select((candidate, index) => new GuidedCandidateRow(index + 1, candidate))
+                .ToArray();
+            GuidedQualityText.Text = FormatQuality(result.Quality);
+            GuidedCandidateDetailsText.Text = result.Quality.CanAnalyze
+                ? $"Найдено кандидатов: {result.Candidates.Count}. Выберите строку для объяснения score."
+                : "Уверенный вывод не сформирован: исправьте ошибки качества эксперимента.";
+            StatusText.Text = result.Quality.CanAnalyze
+                ? $"Guided Diagnostics: кандидатов {result.Candidates.Count}; повторов {_guidedRuns.Count}."
+                : "Guided Diagnostics остановлен из-за непригодных входных данных.";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка Guided Diagnostics",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private (GuidedExperimentRun Run, GuidedExperimentRepeat Definition) CreateCurrentGuidedRepeat(int repeatNumber)
+    {
+        if (_loadedFrames.Count == 0 || string.IsNullOrWhiteSpace(_loadedTrcPath))
+        {
+            throw new InvalidOperationException("Сначала откройте PCAN-View TRC с записью эксперимента.");
+        }
+
+        var referenceWindow = new TraceWindow(
+            ParseMilliseconds(GuidedReferenceStartTextBox.Text, "начало REFERENCE"),
+            ParseMilliseconds(GuidedReferenceEndTextBox.Text, "конец REFERENCE"));
+        var actionWindow = new TraceWindow(
+            ParseMilliseconds(GuidedActionStartTextBox.Text, "начало ACTION"),
+            ParseMilliseconds(GuidedActionEndTextBox.Text, "конец ACTION"));
+        referenceWindow.Validate();
+        actionWindow.Validate();
+        var origin = _loadedFrames.Min(frame => frame.Timestamp);
+        var referenceFrames = SelectFrames(_loadedFrames, origin, referenceWindow);
+        var actionFrames = SelectFrames(_loadedFrames, origin, actionWindow);
+        var approximateMilliseconds = ParseOptionalMilliseconds(
+            GuidedApproximateTimeTextBox.Text, "примерное время действия");
+        var toleranceMilliseconds = ParseMilliseconds(GuidedToleranceTextBox.Text, "временной допуск");
+        var bus = string.IsNullOrWhiteSpace(CanBusTextBox.Text) ? "CAN1" : CanBusTextBox.Text.Trim();
+
+        var definition = new GuidedExperimentRepeat
+        {
+            RepeatNumber = repeatNumber,
+            ReferenceSource = new ExperimentTraceSource
+            {
+                Path = _loadedTrcPath,
+                Bus = bus,
+                Window = referenceWindow
+            },
+            ActionSource = new ExperimentTraceSource
+            {
+                Path = _loadedTrcPath,
+                Bus = bus,
+                Window = actionWindow
+            },
+            ActionApproximateTimeMilliseconds = approximateMilliseconds,
+            EventSearchToleranceMilliseconds = toleranceMilliseconds
+        };
+        var run = new GuidedExperimentRun(
+            repeatNumber,
+            bus,
+            referenceFrames,
+            actionFrames,
+            approximateMilliseconds.HasValue ? origin.AddMilliseconds(approximateMilliseconds.Value) : null,
+            TimeSpan.FromMilliseconds(toleranceMilliseconds),
+            ReferenceWindow: referenceWindow,
+            ActionWindow: actionWindow,
+            ReferencePath: _loadedTrcPath,
+            ActionPath: _loadedTrcPath);
+        return (run, definition);
+    }
+
+    private void GuidedCandidatesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (GuidedCandidatesGrid.SelectedItem is not GuidedCandidateRow row)
+        {
+            return;
+        }
+
+        var reasons = row.Candidate.ScoreExplanation.Count == 0
+            ? "нет положительных факторов"
+            : string.Join("; ", row.Candidate.ScoreExplanation.Select(item =>
+                $"{(item.Points >= 0 ? "+" : string.Empty)}{item.Points} {GuidedDiagnosticsText.Score(item)}"));
+        var sequence = row.Candidate.Temporal?.Sequence.Count > 0
+            ? " Последовательность: " + string.Join(" → ", row.Candidate.Temporal.Sequence.Select(value => value.ToString("X2"))) + "."
+            : string.Empty;
+        GuidedCandidateDetailsText.Text =
+            $"Почему кандидат №{row.Rank}: {reasons}. Статус остаётся CANDIDATE до подтверждения.{sequence}";
+    }
+
+    private void NewProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        _machineProfile = new MachineProfile();
+        _machineProfilePath = null;
+        ApplyProfileToFields();
+        StatusText.Text = "Создан профиль новой / неизвестной машины.";
+    }
+
+    private async void OpenProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Профиль CraneCAN (*.craneprofile)|*.craneprofile|JSON (*.json)|*.json",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            _machineProfile = await GuidedJsonCodec.LoadProfileAsync(dialog.FileName);
+            _machineProfilePath = dialog.FileName;
+            ApplyProfileToFields();
+            StatusText.Text = $"Профиль открыт: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка открытия профиля",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void SaveProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Профиль CraneCAN (*.craneprofile)|*.craneprofile",
+            FileName = _machineProfilePath is null
+                ? SanitizeFileName(MachineNameTextBox.Text) + ".craneprofile"
+                : Path.GetFileName(_machineProfilePath)
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            UpdateProfileFromFields();
+            await GuidedJsonCodec.SaveProfileAsync(dialog.FileName, _machineProfile);
+            _machineProfilePath = dialog.FileName;
+            StatusText.Text = $"Профиль сохранён: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка сохранения профиля",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void AddCandidateToProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (GuidedCandidatesGrid.SelectedItem is not GuidedCandidateRow row)
+        {
+            MessageBox.Show("Выберите кандидата в таблице.", "Профиль машины",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var status = ProfileStatusCombo.SelectedItem is SignalKnowledgeState selected
+            ? selected
+            : SignalKnowledgeState.Candidate;
+        if (status == SignalKnowledgeState.Confirmed && row.Candidate.RepeatabilityCount < 2)
+        {
+            var answer = MessageBox.Show(
+                "Кандидат наблюдался только в одном опыте. CONFIRMED означает пользовательское подтверждение evidence. Продолжить?",
+                "Подтверждение статуса",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        UpdateProfileFromFields();
+        _machineProfile = MachineProfileService.AddCandidate(
+            _machineProfile,
+            row.Candidate,
+            GuidedActionNameTextBox.Text.Trim(),
+            status,
+            $"Добавлено пользователем из кандидата №{row.Rank}");
+        StatusText.Text = $"Сигнал добавлен в профиль как {status}. Сохраните профиль на диск.";
+    }
+
+    private async void SaveGuidedExperimentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_guidedRepeatDefinitions.Count == 0)
+        {
+            MessageBox.Show("Сначала добавьте хотя бы один REFERENCE/ACTION повтор.", "Эксперимент",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Эксперимент CraneCAN (*.canexperiment)|*.canexperiment",
+            FileName = SanitizeFileName(GuidedActionNameTextBox.Text) + ".canexperiment"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var experiment = CreateExperimentDocument();
+            await GuidedJsonCodec.SaveExperimentAsync(dialog.FileName, experiment);
+            StatusText.Text = $"Эксперимент сохранён: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка сохранения эксперимента",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void OpenGuidedExperimentButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Эксперимент CraneCAN (*.canexperiment)|*.canexperiment|JSON (*.json)|*.json",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        SetBusy(true, "Открытие эксперимента и связанных TRC…");
+        try
+        {
+            var experiment = await GuidedJsonCodec.LoadExperimentAsync(dialog.FileName);
+            var loadedRuns = new List<GuidedExperimentRun>();
+            foreach (var definition in experiment.Repeats.OrderBy(item => item.RepeatNumber))
+            {
+                loadedRuns.Add(await LoadGuidedRunAsync(definition));
+            }
+
+            _guidedRuns.Clear();
+            _guidedRuns.AddRange(loadedRuns);
+            _guidedRepeatDefinitions.Clear();
+            _guidedRepeatDefinitions.AddRange(experiment.Repeats);
+            GuidedActionNameTextBox.Text = experiment.ActionName;
+            CanBusTextBox.Text = experiment.Bus;
+            GuidedRepeatsText.Text = $"Открыт эксперимент: повторов {_guidedRuns.Count}.";
+            GuidedQualityText.Text = "Связанные TRC загружены. Нажмите «АНАЛИЗИРОВАТЬ».";
+            StatusText.Text = $"Эксперимент открыт: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка открытия эксперимента",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private GuidedExperiment CreateExperimentDocument() => new()
+    {
+        MachineProfileId = _machineProfile.ProfileId,
+        Name = GuidedActionNameTextBox.Text.Trim(),
+        ActionName = GuidedActionNameTextBox.Text.Trim(),
+        Description = GuidedActionTypeCombo.SelectedItem?.ToString() ?? string.Empty,
+        Bus = string.IsNullOrWhiteSpace(CanBusTextBox.Text) ? "CAN1" : CanBusTextBox.Text.Trim(),
+        Repeats = _guidedRepeatDefinitions.ToList(),
+        Candidates = _guidedCandidates.Select(candidate => new GuidedCandidateSnapshot
+        {
+            StableKey = candidate.StableKey,
+            Id = candidate.Id,
+            IsExtended = candidate.IsExtended,
+            DataIndex = candidate.DataIndex,
+            BitIndex = candidate.BitIndex,
+            ReferenceValue = candidate.ReferenceValue,
+            ActionValue = candidate.ActionValue,
+            Score = candidate.Score,
+            RepeatabilityCount = candidate.RepeatabilityCount,
+            RepeatCount = candidate.RepeatCount,
+            Status = candidate.Status
+        }).ToList()
+    };
+
+    private static async Task<GuidedExperimentRun> LoadGuidedRunAsync(GuidedExperimentRepeat definition)
+    {
+        if (definition.ReferenceSource.Window is null || definition.ActionSource.Window is null)
+        {
+            throw new InvalidDataException($"Повтор {definition.RepeatNumber} не содержит временных окон.");
+        }
+
+        var referenceTrace = await PcanTrcCodec.LoadAsync(
+            definition.ReferenceSource.Path, definition.ReferenceSource.Channel);
+        var actionTrace = string.Equals(
+            definition.ReferenceSource.Path, definition.ActionSource.Path, StringComparison.OrdinalIgnoreCase)
+            ? referenceTrace
+            : await PcanTrcCodec.LoadAsync(definition.ActionSource.Path, definition.ActionSource.Channel);
+        var referenceOrigin = referenceTrace.Min(frame => frame.Timestamp);
+        var actionOrigin = actionTrace.Min(frame => frame.Timestamp);
+        return new GuidedExperimentRun(
+            definition.RepeatNumber,
+            definition.ActionSource.Bus,
+            SelectFrames(referenceTrace, referenceOrigin, definition.ReferenceSource.Window),
+            SelectFrames(actionTrace, actionOrigin, definition.ActionSource.Window),
+            definition.ActionApproximateTimeMilliseconds.HasValue
+                ? actionOrigin.AddMilliseconds(definition.ActionApproximateTimeMilliseconds.Value)
+                : null,
+            TimeSpan.FromMilliseconds(definition.EventSearchToleranceMilliseconds),
+            ReferenceWindow: definition.ReferenceSource.Window,
+            ActionWindow: definition.ActionSource.Window,
+            ReferencePath: definition.ReferenceSource.Path,
+            ActionPath: definition.ActionSource.Path);
+    }
+
+    private void ApplyProfileToFields()
+    {
+        MachineNameTextBox.Text = _machineProfile.MachineName;
+        ManufacturerTextBox.Text = string.IsNullOrWhiteSpace(_machineProfile.Manufacturer)
+            ? "unknown"
+            : _machineProfile.Manufacturer;
+        MachineModelTextBox.Text = string.IsNullOrWhiteSpace(_machineProfile.Model)
+            ? "unknown"
+            : _machineProfile.Model;
+        CanBusTextBox.Text = _machineProfile.CanBusName;
+    }
+
+    private void UpdateProfileFromFields()
+    {
+        _machineProfile = _machineProfile with
+        {
+            MachineName = string.IsNullOrWhiteSpace(MachineNameTextBox.Text)
+                ? "Новая / неизвестная машина"
+                : MachineNameTextBox.Text.Trim(),
+            Manufacturer = ManufacturerTextBox.Text.Trim(),
+            Model = MachineModelTextBox.Text.Trim(),
+            CanBusName = string.IsNullOrWhiteSpace(CanBusTextBox.Text) ? "CAN1" : CanBusTextBox.Text.Trim(),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static CanFrame[] SelectFrames(
+        IReadOnlyList<CanFrame> frames,
+        DateTimeOffset origin,
+        TraceWindow window)
+    {
+        var start = origin.AddMilliseconds(window.StartMilliseconds);
+        var end = origin.AddMilliseconds(window.EndMilliseconds);
+        return frames.Where(frame => frame.Timestamp >= start && frame.Timestamp < end).ToArray();
+    }
+
+    private static string FormatQuality(ExperimentQualityReport quality)
+    {
+        var heading = !quality.CanAnalyze
+            ? "Эксперимент непригоден:"
+            : quality.IsGood ? "Эксперимент пригоден:" : "Эксперимент сомнительный:";
+        return heading + " " + string.Join("; ", quality.Issues.Select(issue =>
+        {
+            var marker = issue.Severity switch
+            {
+                ExperimentQualitySeverity.Error => "✗",
+                ExperimentQualitySeverity.Warning => "⚠",
+                _ => "✓"
+            };
+            var repeat = issue.RepeatNumber.HasValue ? $" (повтор {issue.RepeatNumber})" : string.Empty;
+            return $"{marker} {GuidedDiagnosticsText.Quality(issue)}{repeat}";
+        }));
+    }
+
+    private static double? ParseOptionalMilliseconds(string text, string fieldName) =>
+        string.IsNullOrWhiteSpace(text) ? null : ParseMilliseconds(text, fieldName);
+
+    private static string SanitizeFileName(string value)
+    {
+        var fallback = string.IsNullOrWhiteSpace(value) ? "CraneCAN_experiment" : value.Trim();
+        foreach (var invalid in Path.GetInvalidFileNameChars())
+        {
+            fallback = fallback.Replace(invalid, '_');
+        }
+
+        return fallback;
+    }
+
     private void SetBusy(bool busy, string? status = null)
     {
         OpenTrcButton.IsEnabled = !busy;
         ClearButton.IsEnabled = !busy;
         CompareWindowsButton.IsEnabled = !busy;
         CompareFilesButton.IsEnabled = !busy;
+        AnalyzeGuidedButton.IsEnabled = !busy;
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusText.Text = status;
@@ -507,6 +972,53 @@ public sealed record GenericCanComparisonRow
     public string StabilityText { get; }
     public string Classification { get; }
     public bool IsSignificant { get; }
+
+    private static string FormatByte(byte? value) => value.HasValue ? value.Value.ToString("X2") : "—";
+}
+
+public sealed record GuidedCandidateRow
+{
+    public GuidedCandidateRow(int rank, GuidedCandidate candidate)
+    {
+        Rank = rank;
+        Candidate = candidate;
+        ActionName = candidate.ActionName;
+        StatusText = candidate.Status.ToString().ToUpperInvariant();
+        Interpretation = GuidedDiagnosticsText.Interpretation(candidate);
+        ScoreText = $"{candidate.Score}/100";
+        RepeatabilityText = $"{candidate.RepeatabilityCount}/{candidate.RepeatCount}";
+        ReactionText = candidate.ReactionMilliseconds.HasValue
+            ? $"{candidate.ReactionMilliseconds.Value:+0.###;-0.###;0} ms"
+            : "—";
+        AgreementText = $"{candidate.AgreementPercent:F1}%";
+        IdText = candidate.IsExtended ? candidate.Id.ToString("X8") : candidate.Id.ToString("X3");
+        LocationText = candidate.DataIndex.HasValue
+            ? candidate.BitIndex.HasValue
+                ? $"DATA[{candidate.DataIndex}], bit {candidate.BitIndex}"
+                : $"DATA[{candidate.DataIndex}]"
+            : "Сообщение";
+        TransitionText = candidate.ReferenceValue.HasValue || candidate.ActionValue.HasValue
+            ? $"{FormatByte(candidate.ReferenceValue)} → {FormatByte(candidate.ActionValue)}"
+            : candidate.ChangeKind switch
+            {
+                CandidateChangeKind.MessageAppeared => "появилось",
+                CandidateChangeKind.MessageDisappeared => "исчезло",
+                _ => "—"
+            };
+    }
+
+    public int Rank { get; }
+    public GuidedCandidate Candidate { get; }
+    public string ActionName { get; }
+    public string StatusText { get; }
+    public string Interpretation { get; }
+    public string ScoreText { get; }
+    public string RepeatabilityText { get; }
+    public string ReactionText { get; }
+    public string AgreementText { get; }
+    public string IdText { get; }
+    public string LocationText { get; }
+    public string TransitionText { get; }
 
     private static string FormatByte(byte? value) => value.HasValue ? value.Value.ToString("X2") : "—";
 }

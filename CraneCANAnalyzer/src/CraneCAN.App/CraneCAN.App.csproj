@@ -6,13 +6,13 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>CraneCAN.Field</AssemblyName>
+    <AssemblyName>CraneCAN</AssemblyName>
     <RootNamespace>CraneCAN.App</RootNamespace>
-    <Version>0.5.0</Version>
-    <AssemblyVersion>0.5.0.0</AssemblyVersion>
-    <FileVersion>0.5.0.0</FileVersion>
-    <Product>CraneCAN Field — SOOSAN JK1200A</Product>
-    <Description>Полевой offline-анализатор Classical CAN трасс PCAN-View.</Description>
+    <Version>0.6.0</Version>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
+    <Product>CraneCAN — Generic Guided Diagnostics</Product>
+    <Description>Универсальная управляемая offline-диагностика неизвестных Classical CAN сетей.</Description>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -34,6 +34,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>docs\SOOSAN_FIELD_CAPTURE.md</TargetPath>
+    </Content>
+    <Content Include="..\..\docs\GENERIC_GUIDED_DIAGNOSTICS.md">
+      <Link>docs\GENERIC_GUIDED_DIAGNOSTICS.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\GENERIC_GUIDED_DIAGNOSTICS.md</TargetPath>
     </Content>
     <Content Include="..\..\tests\CraneCAN.SmokeTests\Fixtures\soosan_mixed.trc">
       <Link>samples\soosan_mixed.trc</Link>
