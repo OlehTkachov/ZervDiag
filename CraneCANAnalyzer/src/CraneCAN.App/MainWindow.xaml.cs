@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly List<GuidedExperimentRun> _guidedRuns = [];
     private readonly List<GuidedExperimentRepeat> _guidedRepeatDefinitions = [];
     private IReadOnlyList<GuidedCandidate> _guidedCandidates = [];
+    private GuidedAnalysisResult? _guidedAnalysisResult;
     private MachineProfile _machineProfile = new();
     private string? _machineProfilePath;
 
@@ -212,6 +213,7 @@ public partial class MainWindow : Window
         _guidedRuns.Clear();
         _guidedRepeatDefinitions.Clear();
         _guidedCandidates = [];
+        _guidedAnalysisResult = null;
         FramesGrid.ItemsSource = _frameRows;
         StatisticsGrid.ItemsSource = Array.Empty<FrameStatistics>();
         ComparisonGrid.ItemsSource = Array.Empty<GenericCanComparisonRow>();
@@ -439,6 +441,7 @@ public partial class MainWindow : Window
 
             SetBusy(true, "Анализ переходов и повторяемости…");
             var result = await Task.Run(() => GuidedDiagnosticsAnalyzer.Analyze(actionName, _guidedRuns));
+            _guidedAnalysisResult = result;
             _guidedCandidates = result.Candidates;
             GuidedCandidatesGrid.ItemsSource = result.Candidates
                 .Select((candidate, index) => new GuidedCandidateRow(index + 1, candidate))
@@ -660,6 +663,39 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             MessageBox.Show(FormatException(exception), "Ошибка сохранения эксперимента",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private async void SaveGuidedReportButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_guidedAnalysisResult is null)
+        {
+            MessageBox.Show("Сначала выполните Guided-анализ.", "Отчёт",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Текстовый отчёт (*.txt)|*.txt",
+            FileName = SanitizeFileName(GuidedActionNameTextBox.Text) + "_report.txt"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var report = GuidedReportFormatter.Format(
+                _guidedAnalysisResult, GuidedActionNameTextBox.Text.Trim(), DateTimeOffset.Now);
+            await File.WriteAllTextAsync(dialog.FileName, report, new UTF8Encoding(true));
+            StatusText.Text = $"Диагностический отчёт сохранён: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Ошибка сохранения отчёта",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }

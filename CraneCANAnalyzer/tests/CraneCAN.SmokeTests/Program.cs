@@ -305,6 +305,11 @@ Require(risingBit.ScoreExplanation.Any(item => item.Reason == ScoreReason.Repeat
     "The confidence explanation did not preserve repeatability and return evidence.");
 Require(guidedResult.Timeline.Any(item => item.EventType == "CandidateChanged" && item.Id == 0x281),
     "Guided event timeline did not include the candidate transition.");
+var guidedReport = GuidedReportFormatter.Format(guidedResult, "Joystick EXTEND", now);
+Require(guidedReport.Contains("КАНДИДАТ #1") && guidedReport.Contains("Повторяемость: 3/3") &&
+        guidedReport.Contains("не доказывает внутреннюю логику ECU") &&
+        !guidedReport.Contains("это точно сигнал", StringComparison.OrdinalIgnoreCase),
+    "Human-readable guided report lost candidate wording or the safety limitation.");
 
 var twoOfThreeRuns = guidedRuns.Take(2).Append(new GuidedExperimentRun(
     3,

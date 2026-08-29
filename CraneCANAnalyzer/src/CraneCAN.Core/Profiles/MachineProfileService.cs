@@ -26,6 +26,17 @@ public static class MachineProfileService
             Description = $"Повторяемость {candidate.RepeatabilityCount}/{candidate.RepeatCount}; score {candidate.Score}/100",
             SourceReference = candidate.StableKey
         };
+        var evidenceItems = new List<SignalEvidence> { evidence };
+        if (status == SignalKnowledgeState.Confirmed)
+        {
+            evidenceItems.Add(new SignalEvidence
+            {
+                Kind = EvidenceKind.UserConfirmation,
+                Description = "Пользователь явно установил статус CONFIRMED.",
+                SourceReference = candidate.StableKey
+            });
+        }
+
         var signal = new MachineSignal
         {
             Name = name.Trim(),
@@ -36,7 +47,7 @@ public static class MachineProfileService
             StartBit = candidate.BitIndex ?? 0,
             BitLength = candidate.BitIndex.HasValue ? 1 : 8,
             Confidence = status,
-            Evidence = [evidence],
+            Evidence = evidenceItems,
             Source = "Guided Diagnostics experiment",
             Notes = notes?.Trim() ?? string.Empty
         };

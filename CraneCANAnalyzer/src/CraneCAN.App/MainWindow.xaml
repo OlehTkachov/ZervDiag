@@ -201,6 +201,7 @@
                             <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
                                 <ComboBox x:Name="ProfileStatusCombo" Width="115" Margin="4" />
                                 <Button Content="Добавить выбранный в профиль" Click="AddCandidateToProfileButton_Click" />
+                                <Button Content="Сохранить отчёт…" Click="SaveGuidedReportButton_Click" />
                             </WrapPanel>
                             <TextBlock x:Name="GuidedCandidateDetailsText" Text="Выберите кандидата, чтобы увидеть прозрачное объяснение score."
                                        TextWrapping="Wrap" VerticalAlignment="Center" />
