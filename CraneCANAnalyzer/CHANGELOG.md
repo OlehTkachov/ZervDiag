@@ -1,5 +1,15 @@
 # История изменений
 
+## 0.6.0 — Generic Guided Diagnostics
+
+- Добавлен Guided workflow REFERENCE/ACTION для неизвестной машины.
+- Добавлены несколько повторов, repeatability и transparent confidence score.
+- Добавлен temporal analyzer для bit/byte transitions, ramp, return и timeline.
+- Добавлены quality checks и защита от пересекающихся/пустых окон и разных buses.
+- Добавлены открытые `.craneprofile` и `.canexperiment` JSON-документы.
+- Добавлены статусы знания и evidence без автоматического CONFIRMED.
+- SOOSAN оставлен только regression fixture; live CAN и Tx отсутствуют.
+
 ## 0.4.1-test — 27.08.2026
 
 - Исправлен дымовой тест экспорта стендового CSV: теперь он проверяет значения

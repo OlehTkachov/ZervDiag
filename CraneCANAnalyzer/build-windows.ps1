@@ -3,10 +3,11 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appProject = Join-Path $projectRoot "src\CraneCAN.App\CraneCAN.App.csproj"
 $smokeProject = Join-Path $projectRoot "tests\CraneCAN.SmokeTests\CraneCAN.SmokeTests.csproj"
-$publishDirectory = Join-Path $projectRoot "publish\soosan-field-win-x64"
-$publishedExe = Join-Path $publishDirectory "CraneCAN.Field.exe"
+$publishDirectory = Join-Path $projectRoot "publish\generic-guided-win-x64"
+$publishedExe = Join-Path $publishDirectory "CraneCAN.exe"
 $publishedReadme = Join-Path $publishDirectory "README.md"
 $publishedFieldGuide = Join-Path $publishDirectory "docs\SOOSAN_FIELD_CAPTURE.md"
+$publishedGuidedGuide = Join-Path $publishDirectory "docs\GENERIC_GUIDED_DIAGNOSTICS.md"
 $publishedFixture = Join-Path $publishDirectory "samples\soosan_mixed.trc"
 
 function Assert-DotNetSuccess([string]$step) {
@@ -37,7 +38,7 @@ Assert-DotNetSuccess "Smoke-test build"
 Assert-DotNetSuccess "Smoke tests"
 
 if (Test-Path -LiteralPath $publishDirectory) {
-    Write-Host "Removing the previous SOOSAN field build..."
+    Write-Host "Removing the previous Generic Guided build..."
     Remove-Item -LiteralPath $publishDirectory -Recurse -Force
 }
 
@@ -45,7 +46,7 @@ Write-Host "Restoring self-contained Windows x64 assets..."
 & dotnet restore $appProject -r win-x64 -p:SelfContained=true
 Assert-DotNetSuccess "Windows x64 restore"
 
-Write-Host "Publishing CraneCAN Field 0.5.0 for SOOSAN JK1200A..."
+Write-Host "Publishing CraneCAN 0.6 Generic Guided Diagnostics..."
 & dotnet publish $appProject `
     -c Release `
     -r win-x64 `
@@ -66,17 +67,20 @@ if (-not (Test-Path -LiteralPath $publishedReadme)) {
 if (-not (Test-Path -LiteralPath $publishedFieldGuide)) {
     throw "SOOSAN field guide was not copied to the publish directory: $publishedFieldGuide"
 }
+if (-not (Test-Path -LiteralPath $publishedGuidedGuide)) {
+    throw "Guided diagnostics guide was not copied to the publish directory: $publishedGuidedGuide"
+}
 if (-not (Test-Path -LiteralPath $publishedFixture)) {
     throw "SOOSAN control TRC was not copied to the publish directory: $publishedFixture"
 }
 
 $hash = (Get-FileHash -LiteralPath $publishedExe -Algorithm SHA256).Hash.ToLowerInvariant()
-$hashLine = "$hash *CraneCAN.Field.exe"
+$hashLine = "$hash *CraneCAN.exe"
 Set-Content -LiteralPath (Join-Path $publishDirectory "SHA256SUMS.txt") -Value $hashLine -Encoding ascii
 
 Write-Host ""
 Write-Host "READY: $publishDirectory" -ForegroundColor Green
-Write-Host "Run: CraneCAN.Field.exe"
-Write-Host "Read first: README.md and docs\SOOSAN_FIELD_CAPTURE.md"
+Write-Host "Run: CraneCAN.exe"
+Write-Host "Read first: README.md and docs\GENERIC_GUIDED_DIAGNOSTICS.md"
 Write-Host "The target PC does not need .NET Runtime. Copy the entire publish folder."
-Write-Host "CraneCAN Field is offline-only: PCAN-View records TRC in Listen-only mode."
+Write-Host "CraneCAN is offline-only: PCAN-View records TRC in Listen-only mode."
