@@ -489,6 +489,20 @@ try
             restoredProfile.ExperimentalSignals.Single().Evidence.Single().Kind == EvidenceKind.RepeatedExperiment,
         "Machine profile or evidence JSON round-trip failed.");
 
+    var upsertConfirmedProfile = MachineProfileService.AddCandidate(
+        restoredProfile,
+        risingBit,
+        "Joystick EXTEND",
+        SignalKnowledgeState.Confirmed,
+        "Confirmed after repeated experiment");
+    Require(upsertConfirmedProfile.ExperimentalSignals.Count == 0 &&
+            upsertConfirmedProfile.KnownSignals.Count == 1 &&
+            upsertConfirmedProfile.KnownSignals.Single().SignalId ==
+                restoredProfile.ExperimentalSignals.Single().SignalId &&
+            upsertConfirmedProfile.KnownSignals.Single().Evidence.Any(item =>
+                item.Kind == EvidenceKind.UserConfirmation),
+        "Re-analyzing the same location must promote CANDIDATE to CONFIRMED without a duplicate.");
+
     var confirmedProfile = MachineProfileService.PromoteSignal(
         restoredProfile,
         restoredProfile.ExperimentalSignals.Single().SignalId,

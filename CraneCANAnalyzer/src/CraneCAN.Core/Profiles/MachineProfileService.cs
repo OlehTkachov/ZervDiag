@@ -54,6 +54,25 @@ public static class MachineProfileService
 
         var known = profile.KnownSignals.ToList();
         var experimental = profile.ExperimentalSignals.ToList();
+        var existing = known.Concat(experimental).FirstOrDefault(item =>
+            item.CanId == signal.CanId &&
+            item.IsExtended == signal.IsExtended &&
+            item.StartByte == signal.StartByte &&
+            item.StartBit == signal.StartBit &&
+            item.BitLength == signal.BitLength);
+        if (existing is not null)
+        {
+            known.RemoveAll(item => item.SignalId == existing.SignalId);
+            experimental.RemoveAll(item => item.SignalId == existing.SignalId);
+            signal = signal with
+            {
+                SignalId = existing.SignalId,
+                Evidence = existing.Evidence.Concat(signal.Evidence).ToList(),
+                CreatedAt = existing.CreatedAt,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+        }
+
         if (status == SignalKnowledgeState.Confirmed)
         {
             known.Add(signal);
