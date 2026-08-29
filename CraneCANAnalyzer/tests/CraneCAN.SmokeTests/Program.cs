@@ -1,4 +1,5 @@
 using CraneCAN.Core.Analysis;
+using CraneCAN.Core.Guided;
 using CraneCAN.Core.Models;
 using CraneCAN.Core.Profiles;
 using CraneCAN.Core.Protocols;
@@ -269,9 +270,137 @@ var oversizedTrcError = CaptureException(() => PcanTrcCodec.Parse(new[]
 Require(oversizedTrcError is InvalidDataException && oversizedTrcError.Message.Contains("исходный файл не изменён"),
     "An oversized TRC must stop with a clear memory-safety message.");
 
+var guidedReference = CreateClassicalFrames(now.AddSeconds(10), 0x281, false, 5,
+    _ => new byte[] { 0x00, 0x20 });
+var guidedAction = CreateClassicalFrames(now.AddSeconds(11), 0x281, false, 5,
+    _ => new byte[] { 0x20, 0x00 });
+var guidedReturn = CreateClassicalFrames(now.AddSeconds(12), 0x281, false, 3,
+    _ => new byte[] { 0x00, 0x20 });
+var guidedRuns = Enumerable.Range(1, 3)
+    .Select(repeat => new GuidedExperimentRun(
+        repeat,
+        "CAN1",
+        guidedReference,
+        guidedAction,
+        ApproximateEventTime: guidedAction[0].Timestamp,
+        EventSearchTolerance: TimeSpan.Zero,
+        ReturnFrames: guidedReturn))
+    .ToArray();
+var guidedResult = GuidedDiagnosticsAnalyzer.Analyze("Joystick EXTEND", guidedRuns);
+Require(guidedResult.Quality.CanAnalyze, "A complete guided experiment must be analyzable.");
+var risingBit = guidedResult.Candidates.Single(candidate =>
+    candidate.Id == 0x281 && candidate.DataIndex == 0 && candidate.BitIndex == 5);
+var fallingBit = guidedResult.Candidates.Single(candidate =>
+    candidate.Id == 0x281 && candidate.DataIndex == 1 && candidate.BitIndex == 5);
+Require(risingBit.ReferenceValue == 0 && risingBit.ActionValue == 0x20 &&
+        risingBit.ChangeKind == CandidateChangeKind.StableBit,
+    "Guided diagnostics did not detect stable bit 0→1.");
+Require(fallingBit.ReferenceValue == 0x20 && fallingBit.ActionValue == 0 &&
+        fallingBit.ChangeKind == CandidateChangeKind.StableBit,
+    "Guided diagnostics did not detect stable bit 1→0.");
+Require(risingBit.RepeatabilityCount == 3 && risingBit.RepeatCount == 3 && risingBit.Score >= 90,
+    "A repeatable 3/3 stable bit with return must receive a high transparent score.");
+Require(risingBit.ScoreExplanation.Any(item => item.Reason == ScoreReason.RepeatedAllThreeOrMore) &&
+        risingBit.ScoreExplanation.Any(item => item.Reason == ScoreReason.ReturnsToBaseline),
+    "The confidence explanation did not preserve repeatability and return evidence.");
+Require(guidedResult.Timeline.Any(item => item.EventType == "CandidateChanged" && item.Id == 0x281),
+    "Guided event timeline did not include the candidate transition.");
+
+var twoOfThreeRuns = guidedRuns.Take(2).Append(new GuidedExperimentRun(
+    3,
+    "CAN1",
+    CreateClassicalFrames(now.AddSeconds(20), 0x281, false, 5, _ => new byte[] { 0x00, 0x20 }),
+    CreateClassicalFrames(now.AddSeconds(21), 0x281, false, 5, _ => new byte[] { 0x00, 0x20 }))).ToArray();
+var twoOfThreeResult = GuidedDiagnosticsAnalyzer.Analyze("Joystick EXTEND", twoOfThreeRuns);
+Require(twoOfThreeResult.Candidates.Single(candidate =>
+        candidate.Id == 0x281 && candidate.DataIndex == 0).RepeatabilityCount == 2,
+    "Guided diagnostics did not report 2/3 repeatability.");
+
+var rampActionValues = new byte[] { 0x02, 0x0F, 0x11, 0x40, 0xC8, 0xC8, 0xC8 };
+var rampResult = GuidedDiagnosticsAnalyzer.Analyze("Joystick EXTEND",
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        CreateClassicalFrames(now.AddSeconds(30), 0x18F, false, 5, _ => new byte[] { 0x00 }),
+        CreateClassicalFrames(now.AddSeconds(31), 0x18F, false, rampActionValues.Length,
+            index => new[] { rampActionValues[index] }))
+]);
+var rampCandidate = rampResult.Candidates.Single(candidate => candidate.Id == 0x18F);
+Require(rampCandidate.ChangeKind == CandidateChangeKind.Ramp &&
+        rampCandidate.Temporal is { MinimumValue: 0x02, MaximumValue: 0xC8, TransitionCount: >= 4 } &&
+        rampCandidate.Temporal.MonotonicityPercent == 100,
+    "Temporal analyzer did not recognize the JCH4-style monotonic ramp.");
+
+var beforeActionResult = GuidedDiagnosticsAnalyzer.Analyze("Delayed action",
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        CreateClassicalFrames(now.AddSeconds(40), 0x500, false, 4, _ => new byte[] { 0x00 }),
+        CreateClassicalFrames(now.AddSeconds(41), 0x500, false, 4, _ => new byte[] { 0x01 }),
+        ApproximateEventTime: now.AddSeconds(41.2),
+        EventSearchTolerance: TimeSpan.Zero)
+]);
+var beforeActionCandidate = beforeActionResult.Candidates.Single(candidate => candidate.Id == 0x500);
+Require(beforeActionCandidate.ReactionMilliseconds < 0 &&
+        beforeActionCandidate.ScoreExplanation.Any(item => item.Reason == ScoreReason.OccursBeforeAction),
+    "A change before the declared physical action must be penalized.");
+
+var sameNumericIdResult = GuidedDiagnosticsAnalyzer.Analyze("Format separation",
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        CreateClassicalFrames(now.AddSeconds(50), 0x123, false, 4, _ => new byte[] { 0x00 })
+            .Concat(CreateClassicalFrames(now.AddSeconds(50), 0x123, true, 4, _ => new byte[] { 0x10 })).ToArray(),
+        CreateClassicalFrames(now.AddSeconds(51), 0x123, false, 4, _ => new byte[] { 0x01 })
+            .Concat(CreateClassicalFrames(now.AddSeconds(51), 0x123, true, 4, _ => new byte[] { 0x12 })).ToArray())
+]);
+Require(sameNumericIdResult.Candidates.Count(candidate => candidate.Id == 0x123) == 2 &&
+        sameNumericIdResult.Candidates.Select(candidate => candidate.IsExtended).Distinct().Count() == 2,
+    "Standard and Extended frames with the same numeric ID were merged incorrectly.");
+
+var overlappingQuality = ExperimentQualityAnalyzer.Evaluate(
+[
+    new GuidedExperimentRun(
+        1,
+        "CAN1",
+        guidedReference,
+        guidedAction,
+        ReferenceWindow: new TraceWindow(0, 100),
+        ActionWindow: new TraceWindow(50, 150),
+        ReferencePath: "same.trc",
+        ActionPath: "same.trc")
+]);
+Require(!overlappingQuality.CanAnalyze && overlappingQuality.Issues.Any(issue =>
+        issue.Code == ExperimentQualityCode.OverlappingWindows),
+    "Overlapping windows must make a guided experiment invalid.");
+var emptyReferenceQuality = ExperimentQualityAnalyzer.Evaluate(
+[
+    new GuidedExperimentRun(1, "CAN1", [], guidedAction)
+]);
+var emptyActionQuality = ExperimentQualityAnalyzer.Evaluate(
+[
+    new GuidedExperimentRun(1, "CAN1", guidedReference, [])
+]);
+Require(!emptyReferenceQuality.CanAnalyze && !emptyActionQuality.CanAnalyze,
+    "Empty REFERENCE or ACTION must make the experiment invalid.");
+Require(Enum.GetValues<SignalKnowledgeState>().SequenceEqual(new[]
+    {
+        SignalKnowledgeState.Unknown,
+        SignalKnowledgeState.Candidate,
+        SignalKnowledgeState.Probable,
+        SignalKnowledgeState.Confirmed,
+        SignalKnowledgeState.Rejected
+    }),
+    "Signal knowledge states are incomplete or out of order.");
+
 var onkTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-{Guid.NewGuid():N}.csv");
 var canTemporaryFile = Path.Combine(Path.GetTempPath(), $"classical-can-{Guid.NewGuid():N}.csv");
 var benchTemporaryFile = Path.Combine(Path.GetTempPath(), $"onk160-bench-{Guid.NewGuid():N}.csv");
+var profileTemporaryFile = Path.Combine(Path.GetTempPath(), $"machine-{Guid.NewGuid():N}.craneprofile");
+var experimentTemporaryFile = Path.Combine(Path.GetTempPath(), $"experiment-{Guid.NewGuid():N}.canexperiment");
 try
 {
     await CanCsvCodec.SaveAsync(onkTemporaryFile, onkFrames);
@@ -306,6 +435,84 @@ try
             f7ReportRow[5] == "80" &&
             f7ReportRow[6] == "7: 1→0",
         "Bench CSV report did not preserve the bit transition.");
+
+    var profile = MachineProfileService.AddCandidate(
+        new MachineProfile
+        {
+            Manufacturer = "unknown",
+            Model = "unknown",
+            MachineName = "Test machine",
+            CanBusName = "CAN1"
+        },
+        risingBit,
+        "Joystick EXTEND",
+        SignalKnowledgeState.Candidate,
+        "Synthetic smoke test");
+    await GuidedJsonCodec.SaveProfileAsync(profileTemporaryFile, profile);
+    var restoredProfile = await GuidedJsonCodec.LoadProfileAsync(profileTemporaryFile);
+    Require(restoredProfile.ProfileId == profile.ProfileId &&
+            restoredProfile.ExperimentalSignals.Single().Confidence == SignalKnowledgeState.Candidate &&
+            restoredProfile.ExperimentalSignals.Single().Evidence.Single().Kind == EvidenceKind.RepeatedExperiment,
+        "Machine profile or evidence JSON round-trip failed.");
+
+    var confirmedProfile = MachineProfileService.PromoteSignal(
+        restoredProfile,
+        restoredProfile.ExperimentalSignals.Single().SignalId,
+        SignalKnowledgeState.Confirmed,
+        new SignalEvidence
+        {
+            Kind = EvidenceKind.UserConfirmation,
+            Description = "Physically confirmed"
+        });
+    Require(confirmedProfile.ExperimentalSignals.Count == 0 &&
+            confirmedProfile.KnownSignals.Single().Confidence == SignalKnowledgeState.Confirmed &&
+            confirmedProfile.KnownSignals.Single().Evidence.Count == 2,
+        "Candidate-to-confirmed profile promotion failed.");
+
+    var experiment = new GuidedExperiment
+    {
+        Name = "Joystick EXTEND",
+        ActionName = "Joystick EXTEND",
+        Bus = "CAN1",
+        Repeats =
+        [
+            new GuidedExperimentRepeat
+            {
+                RepeatNumber = 1,
+                ReferenceSource = new ExperimentTraceSource
+                {
+                    Path = fixturePath,
+                    Bus = "CAN1",
+                    Window = new TraceWindow(0, 40)
+                },
+                ActionSource = new ExperimentTraceSource
+                {
+                    Path = fixturePath,
+                    Bus = "CAN1",
+                    Window = new TraceWindow(200, 240)
+                }
+            }
+        ],
+        Candidates =
+        [
+            new GuidedCandidateSnapshot
+            {
+                StableKey = risingBit.StableKey,
+                Id = risingBit.Id,
+                DataIndex = risingBit.DataIndex,
+                BitIndex = risingBit.BitIndex,
+                Score = risingBit.Score,
+                RepeatabilityCount = 3,
+                RepeatCount = 3
+            }
+        ]
+    };
+    await GuidedJsonCodec.SaveExperimentAsync(experimentTemporaryFile, experiment);
+    var restoredExperiment = await GuidedJsonCodec.LoadExperimentAsync(experimentTemporaryFile);
+    Require(restoredExperiment.ExperimentId == experiment.ExperimentId &&
+            restoredExperiment.Repeats.Single().ReferenceSource.Window == new TraceWindow(0, 40) &&
+            restoredExperiment.Candidates.Single().Status == SignalKnowledgeState.Candidate,
+        "Guided experiment JSON round-trip failed.");
 }
 finally
 {
@@ -322,6 +529,16 @@ finally
     if (File.Exists(benchTemporaryFile))
     {
         File.Delete(benchTemporaryFile);
+    }
+
+    if (File.Exists(profileTemporaryFile))
+    {
+        File.Delete(profileTemporaryFile);
+    }
+
+    if (File.Exists(experimentTemporaryFile))
+    {
+        File.Delete(experimentTemporaryFile);
     }
 }
 
