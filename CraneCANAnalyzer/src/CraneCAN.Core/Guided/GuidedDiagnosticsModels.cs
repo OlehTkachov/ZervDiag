@@ -70,6 +70,32 @@ public sealed record GuidedExperiment
     public List<GuidedExperimentRepeat> Repeats { get; init; } = [];
     public List<GuidedCandidateSnapshot> Candidates { get; init; } = [];
     public List<Guid> ConfirmedSignals { get; init; } = [];
+    public List<LiveCaptureMetadata> LiveCaptures { get; init; } = [];
+}
+
+public sealed record LiveCaptureMetadata
+{
+    public Guid SessionId { get; init; }
+    public int RepeatNumber { get; init; }
+    public string DriverId { get; init; } = string.Empty;
+    public string ChannelId { get; init; } = string.Empty;
+    public int Bitrate { get; init; }
+    public bool ListenOnlyConfirmed { get; init; }
+    public string RawCapturePath { get; init; } = string.Empty;
+    public DateTimeOffset CaptureStart { get; init; }
+    public DateTimeOffset BaselineStart { get; init; }
+    public DateTimeOffset BaselineEnd { get; init; }
+    public DateTimeOffset ActionStart { get; init; }
+    public DateTimeOffset ActionEnd { get; init; }
+    public DateTimeOffset PostActionEnd { get; init; }
+    public string OperatorInstruction { get; init; } = string.Empty;
+    public string Outcome { get; init; } = string.Empty;
+    public long ReceivedFrames { get; init; }
+    public long StandardFrames { get; init; }
+    public long ExtendedFrames { get; init; }
+    public long LostFrames { get; init; }
+    public long ErrorFrames { get; init; }
+    public List<string> QualityWarnings { get; init; } = [];
 }
 
 public sealed record GuidedExperimentRun(
