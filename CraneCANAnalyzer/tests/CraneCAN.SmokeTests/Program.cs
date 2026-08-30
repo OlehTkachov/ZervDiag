@@ -1,9 +1,12 @@
 using CraneCAN.Core.Analysis;
+using CraneCAN.Core.Drivers;
 using CraneCAN.Core.Guided;
+using CraneCAN.Core.Live;
 using CraneCAN.Core.Models;
 using CraneCAN.Core.Profiles;
 using CraneCAN.Core.Protocols;
 using CraneCAN.Core.Storage;
+using CraneCAN.Driver.PcanBasic;
 using System.Text;
 
 var now = DateTimeOffset.UtcNow;
@@ -250,6 +253,135 @@ Require(variableDlcChange.Priority == GenericCanChangePriority.Low &&
 var identicalFiles = await GenericTraceExperiment.CompareFilesAsync(fixturePath, fixturePath, channel: 2);
 Require(identicalFiles.Comparisons.All(row => !row.IsChanged),
     "Two identical TRC files must not produce Reference/Action changes.");
+
+var liveFixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "live_guided_demo.trc");
+var liveFixtureFrames = await PcanTrcCodec.LoadAsync(liveFixturePath);
+Require(liveFixtureFrames.Count == 48 && liveFixtureFrames.Select(frame => frame.Timestamp)
+        .SequenceEqual(liveFixtureFrames.Select(frame => frame.Timestamp).OrderBy(value => value)),
+    "Live replay fixture order or timestamps were not preserved.");
+Require(liveFixtureFrames.Any(frame => frame.Id == 0x18F && !frame.IsExtended && frame.Dlc == 5) &&
+        liveFixtureFrames.Any(frame => frame.Id == 0x0CFF5321 && frame.IsExtended && frame.Dlc == 8),
+    "Live replay lost Standard/Extended separation or DLC.");
+
+await using (var replay = new ReplayCanDriver(liveFixturePath, ReplayTimingMode.Accelerated, 100_000))
+{
+    var replayChannels = await replay.DiscoverChannelsAsync();
+    Require(replayChannels.Count == 1 && replay.SupportsListenOnly,
+        "Replay channel discovery or LISTEN ONLY capability is missing.");
+    await replay.OpenAsync(new CanChannelSettings("replay-trc", 250_000, ListenOnly: true));
+    var replayed = new List<CanFrame>();
+    await foreach (var frame in replay.ReadFramesAsync()) replayed.Add(frame);
+    Require(replayed.Count == liveFixtureFrames.Count && replayed.Select(frame => frame.Id)
+            .SequenceEqual(liveFixtureFrames.Select(frame => frame.Id)) &&
+            replayed.Select(frame => frame.Timestamp).SequenceEqual(liveFixtureFrames.Select(frame => frame.Timestamp)),
+        "Replay driver changed frame order, identifiers or timestamps.");
+    Require(((ICanDriverDiagnostics)replay).GetStatus().ReceivedFrames == 48,
+        "Replay diagnostics did not count received frames.");
+}
+
+await using (var cancellableReplay = new ReplayCanDriver(liveFixturePath, ReplayTimingMode.Step))
+{
+    await cancellableReplay.OpenAsync(new CanChannelSettings("replay-trc", 250_000));
+    using var cancellation = new CancellationTokenSource();
+    await using var enumerator = cancellableReplay.ReadFramesAsync(cancellation.Token).GetAsyncEnumerator();
+    var waitingForStep = enumerator.MoveNextAsync().AsTask();
+    cancellation.Cancel();
+    var cancellationError = await CaptureExceptionAsync(async () => await waitingForStep);
+    Require(cancellationError is OperationCanceledException,
+        "Replay ReadFramesAsync did not honor CancellationToken.");
+}
+
+var buffer = new LiveCanBuffer(TimeSpan.FromSeconds(2), maximumFrameCount: 3);
+buffer.AppendRange(liveFixtureFrames.Take(5));
+Require(buffer.Count == 3 && buffer.EvictedFrames == 2 &&
+        buffer.Snapshot().Select(frame => frame.Timestamp).SequenceEqual(liveFixtureFrames.Skip(2).Take(3).Select(frame => frame.Timestamp)),
+    "Live buffer rollover did not preserve the newest ordered frames.");
+var rangedFrames = buffer.GetRange(liveFixtureFrames[2].Timestamp, liveFixtureFrames[4].Timestamp);
+Require(rangedFrames.Count == 2, "Live buffer time-range boundaries are incorrect.");
+
+var liveRawPath = Path.Combine(Path.GetTempPath(), $"cranecan-live-{Guid.NewGuid():N}.trc");
+try
+{
+    var liveStart = liveFixtureFrames[0].Timestamp;
+    var liveConfiguration = new LiveExperimentConfiguration
+    {
+        ActionName = "TELESCOPE_OUT",
+        OperatorInstruction = "Плавно отклоните джойстик EXTEND и удерживайте.",
+        Bus = "CAN1",
+        RepeatNumber = 1
+    };
+    var liveSession = new LiveExperimentSession(liveConfiguration);
+    await using var liveReplay = new ReplayCanDriver(liveFixturePath, ReplayTimingMode.Accelerated, 100_000);
+    await using var liveReceiver = new LiveCanReceiver(liveReplay);
+    liveReceiver.AttachSession(liveSession);
+    liveSession.Start(liveStart);
+    await liveReceiver.StartAsync(new CanChannelSettings("replay-trc", 250_000, ListenOnly: true),
+        liveRawPath, liveStart);
+    await liveReceiver.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+    Require(liveSession.State == LiveExperimentState.Analyzing,
+        "Complete replay did not reach the Analyzing state.");
+    var liveResult = liveSession.Analyze();
+    await liveReceiver.StopAsync(invalidateActiveExperiment: false);
+    Require(liveResult.Outcome == LiveExperimentOutcome.Valid && liveResult.Analysis.Quality.CanAnalyze,
+        "Complete REFERENCE/ACTION/POST replay was marked invalid.");
+    Require(liveResult.Transitions.Select(item => item.State).SequenceEqual(new[]
+        {
+            LiveExperimentState.Baseline,
+            LiveExperimentState.WaitingForAction,
+            LiveExperimentState.Action,
+            LiveExperimentState.PostAction,
+            LiveExperimentState.Analyzing,
+            LiveExperimentState.Completed
+        }),
+        "Live state machine transition sequence is incorrect.");
+    Require(liveResult.Run.ReferenceFrames.All(frame => frame.Timestamp >= liveResult.Boundaries.BaselineStart &&
+                                                frame.Timestamp < liveResult.Boundaries.BaselineEnd) &&
+            liveResult.Run.ActionFrames.All(frame => frame.Timestamp >= liveResult.Boundaries.ActionStart &&
+                                             frame.Timestamp < liveResult.Boundaries.ActionEnd) &&
+            liveResult.Run.ReturnFrames!.All(frame => frame.Timestamp >= liveResult.Boundaries.ActionEnd &&
+                                              frame.Timestamp < liveResult.Boundaries.PostActionEnd),
+        "REFERENCE/ACTION/POST frame boundaries are not exact.");
+    Require(liveResult.Analysis.Candidates.Any(candidate => candidate.Id == 0x18F &&
+                candidate.DataIndex == 1 && candidate.BitIndex == 1 &&
+                candidate.ReferenceValue == 0x00 && candidate.ActionValue == 0x02),
+        "Full Live Guided cycle did not detect JCH4 0x18F DATA[1] bit 1: 0→1.");
+    Require(liveResult.Analysis.Candidates.Any(candidate => candidate.Id == 0x18F &&
+                candidate.DataIndex == 2 && candidate.ReferenceValue == 0x00 && candidate.ActionValue == 0xC8),
+        "Full Live Guided cycle did not detect JCH4 DATA[2] transition.");
+    var restoredLiveRaw = await PcanTrcCodec.LoadAsync(liveRawPath);
+    Require(restoredLiveRaw.Count == 48 && restoredLiveRaw.Any(frame => frame.IsExtended),
+        "Continuous raw Live TRC capture did not round-trip.");
+}
+finally
+{
+    if (File.Exists(liveRawPath)) File.Delete(liveRawPath);
+}
+
+var emptyLiveSession = new LiveExperimentSession(new LiveExperimentConfiguration());
+emptyLiveSession.Start(now);
+emptyLiveSession.AdvanceTo(now.AddSeconds(23));
+var emptyLiveResult = emptyLiveSession.Analyze();
+Require(emptyLiveResult.Outcome == LiveExperimentOutcome.Invalid &&
+        emptyLiveResult.Analysis.Candidates.Count == 0 &&
+        emptyLiveResult.Warnings.Any(warning => warning.Code == LiveSessionWarningCode.NoFrames),
+    "An empty Live CAN session produced confident candidates.");
+var abortedLiveSession = new LiveExperimentSession(new LiveExperimentConfiguration());
+abortedLiveSession.Start(now);
+abortedLiveSession.Abort(now.AddSeconds(1));
+Require(abortedLiveSession.State == LiveExperimentState.Aborted &&
+        abortedLiveSession.Outcome == LiveExperimentOutcome.Aborted,
+    "Operator Abort did not terminate the Live experiment safely.");
+
+Require(PcanBasicCanDriver.TryMapBitrate(250_000, out var pcan250) && pcan250 == 0x011C &&
+        PcanBasicCanDriver.TryMapBitrate(500_000, out _) &&
+        !PcanBasicCanDriver.TryMapBitrate(123_456, out _),
+    "PCAN Classical CAN bitrate mapping is incorrect.");
+Require(PcanBasicCanDriver.TryParseChannelId("pcan-usb:0051", out var pcanChannel) && pcanChannel == 0x51,
+    "PCAN-USB channel identifier parsing failed.");
+Require(typeof(PcanBasicCanDriver).GetMethods().All(method =>
+        !method.Name.Contains("Write", StringComparison.OrdinalIgnoreCase) &&
+        !method.Name.Contains("Send", StringComparison.OrdinalIgnoreCase)),
+    "Receive-only PCAN driver unexpectedly exposes a transmit method.");
 
 var emptyWindowError = CaptureException(() => GenericTraceExperiment.CompareWindows(
     trcImport.Frames,
@@ -682,6 +814,19 @@ static Exception? CaptureException(Action action)
     try
     {
         action();
+        return null;
+    }
+    catch (Exception exception)
+    {
+        return exception;
+    }
+}
+
+static async Task<Exception?> CaptureExceptionAsync(Func<Task> action)
+{
+    try
+    {
+        await action();
         return null;
     }
     catch (Exception exception)
