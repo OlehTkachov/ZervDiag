@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CraneCAN.Driver.Onk160", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CraneCAN.SmokeTests", "tests\CraneCAN.SmokeTests\CraneCAN.SmokeTests.csproj", "{55C5B0E4-9406-419D-9BD6-0E7EF304560A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CraneCAN.Driver.PcanBasic", "src\CraneCAN.Driver.PcanBasic\CraneCAN.Driver.PcanBasic.csproj", "{7F9AFD35-968B-4A86-A2A0-B1D9C9771954}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,5 +34,9 @@ Global
 		{55C5B0E4-9406-419D-9BD6-0E7EF304560A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{55C5B0E4-9406-419D-9BD6-0E7EF304560A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{55C5B0E4-9406-419D-9BD6-0E7EF304560A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7F9AFD35-968B-4A86-A2A0-B1D9C9771954}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7F9AFD35-968B-4A86-A2A0-B1D9C9771954}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7F9AFD35-968B-4A86-A2A0-B1D9C9771954}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7F9AFD35-968B-4A86-A2A0-B1D9C9771954}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
