@@ -55,6 +55,7 @@ public partial class MainWindow : Window
         ProfileStatusCombo.SelectedIndex = 0;
         ApplyProfileToFields();
         LoadFieldGuide();
+        InitializeLiveGuided();
     }
 
     private async void OpenTrcButton_Click(object sender, RoutedEventArgs e)
@@ -769,37 +770,8 @@ public partial class MainWindow : Window
         }).ToList()
     };
 
-    private static async Task<GuidedExperimentRun> LoadGuidedRunAsync(GuidedExperimentRepeat definition)
-    {
-        if (definition.ReferenceSource.Window is null || definition.ActionSource.Window is null)
-        {
-            throw new InvalidDataException($"Повтор {definition.RepeatNumber} не содержит временных окон.");
-        }
-
-        var referenceTrace = await PcanTrcCodec.LoadAsync(
-            definition.ReferenceSource.Path, definition.ReferenceSource.Channel);
-        var actionTrace = string.Equals(
-            definition.ReferenceSource.Path, definition.ActionSource.Path, StringComparison.OrdinalIgnoreCase)
-            ? referenceTrace
-            : await PcanTrcCodec.LoadAsync(definition.ActionSource.Path, definition.ActionSource.Channel);
-        var referenceOrigin = referenceTrace.Min(frame => frame.Timestamp);
-        var actionOrigin = actionTrace.Min(frame => frame.Timestamp);
-        return new GuidedExperimentRun(
-            definition.RepeatNumber,
-            definition.ActionSource.Bus,
-            SelectFrames(referenceTrace, referenceOrigin, definition.ReferenceSource.Window),
-            SelectFrames(actionTrace, actionOrigin, definition.ActionSource.Window),
-            definition.ActionApproximateTimeMilliseconds.HasValue
-                ? actionOrigin.AddMilliseconds(definition.ActionApproximateTimeMilliseconds.Value)
-                : null,
-            TimeSpan.FromMilliseconds(definition.EventSearchToleranceMilliseconds),
-            ReferenceWindow: definition.ReferenceSource.Window,
-            ActionWindow: definition.ActionSource.Window,
-            ReferencePath: definition.ReferenceSource.Path,
-            ActionPath: definition.ActionSource.Path,
-            ReferenceBus: definition.ReferenceSource.Bus,
-            ActionBus: definition.ActionSource.Bus);
-    }
+    private static Task<GuidedExperimentRun> LoadGuidedRunAsync(GuidedExperimentRepeat definition) =>
+        GuidedExperimentRunLoader.LoadAsync(definition);
 
     private void ApplyProfileToFields()
     {

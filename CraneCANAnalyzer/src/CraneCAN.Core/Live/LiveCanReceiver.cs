@@ -110,7 +110,8 @@ public sealed class LiveCanReceiver : IAsyncDisposable
                 if (writer is not null) await writer.AppendAsync(frame, cancellationToken).ConfigureAwait(false);
                 try { FrameReceived?.Invoke(frame); } catch { }
             }
-            if (!cancellationToken.IsCancellationRequested) HandleUnexpectedStop("Поток CAN завершился без команды Stop.", null);
+            if (!cancellationToken.IsCancellationRequested && !ExperimentReachedAnalysis())
+                HandleUnexpectedStop("Поток CAN завершился без команды Stop.", null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception ex) { if (!_stopping) HandleUnexpectedStop("Соединение с CAN-адаптером потеряно.", ex); }
@@ -126,5 +127,12 @@ public sealed class LiveCanReceiver : IAsyncDisposable
             session.Invalidate(exception is null ? LiveSessionWarningCode.CanStreamStopped : LiveSessionWarningCode.DriverDisconnected,
                 detail, DateTimeOffset.UtcNow);
         try { ReceiverFaulted?.Invoke(detail); } catch { }
+    }
+
+    private bool ExperimentReachedAnalysis()
+    {
+        LiveExperimentSession? session;
+        lock (_sync) session = _session;
+        return session?.State is LiveExperimentState.Analyzing or LiveExperimentState.Completed;
     }
 }

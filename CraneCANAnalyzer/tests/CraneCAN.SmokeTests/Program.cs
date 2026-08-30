@@ -670,6 +670,12 @@ try
                     Path = fixturePath,
                     Bus = "CAN1",
                     Window = new TraceWindow(200, 240)
+                },
+                ReturnSource = new ExperimentTraceSource
+                {
+                    Path = fixturePath,
+                    Bus = "CAN1",
+                    Window = new TraceWindow(0, 40)
                 }
             }
         ],
@@ -685,14 +691,44 @@ try
                 RepeatabilityCount = 3,
                 RepeatCount = 3
             }
+        ],
+        LiveCaptures =
+        [
+            new LiveCaptureMetadata
+            {
+                SessionId = Guid.NewGuid(),
+                RepeatNumber = 1,
+                DriverId = "pcan-trc-replay",
+                ChannelId = "replay-trc",
+                Bitrate = 250_000,
+                ListenOnlyConfirmed = true,
+                RawCapturePath = liveFixturePath,
+                CaptureStart = now,
+                BaselineStart = now,
+                BaselineEnd = now.AddSeconds(5),
+                ActionStart = now.AddSeconds(8),
+                ActionEnd = now.AddSeconds(18),
+                PostActionEnd = now.AddSeconds(23),
+                OperatorInstruction = "Joystick EXTEND",
+                Outcome = "VALID",
+                ReceivedFrames = 48,
+                StandardFrames = 24,
+                ExtendedFrames = 24
+            }
         ]
     };
     await GuidedJsonCodec.SaveExperimentAsync(experimentTemporaryFile, experiment);
     var restoredExperiment = await GuidedJsonCodec.LoadExperimentAsync(experimentTemporaryFile);
     Require(restoredExperiment.ExperimentId == experiment.ExperimentId &&
             restoredExperiment.Repeats.Single().ReferenceSource.Window == new TraceWindow(0, 40) &&
-            restoredExperiment.Candidates.Single().Status == SignalKnowledgeState.Candidate,
+            restoredExperiment.Candidates.Single().Status == SignalKnowledgeState.Candidate &&
+            restoredExperiment.LiveCaptures.Single().ListenOnlyConfirmed &&
+            restoredExperiment.LiveCaptures.Single().ReceivedFrames == 48,
         "Guided experiment JSON round-trip failed.");
+    var restoredRun = await GuidedExperimentRunLoader.LoadAsync(restoredExperiment.Repeats.Single());
+    Require(restoredRun.ReferenceFrames.Count == 4 && restoredRun.ActionFrames.Count == 4 &&
+            restoredRun.ReturnFrames?.Count == 4,
+        "Saved experiment could not reopen REFERENCE/ACTION/POST through the common pipeline.");
 }
 finally
 {
