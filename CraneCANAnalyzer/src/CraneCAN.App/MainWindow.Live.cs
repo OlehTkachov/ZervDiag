@@ -29,6 +29,9 @@ public partial class MainWindow
     private long _liveLastFrameUtcTicks;
     private long _liveStandardFrames;
     private long _liveExtendedFrames;
+    private long _liveReceivedAtExperimentStart;
+    private long _liveLostAtExperimentStart;
+    private long _liveErrorsAtExperimentStart;
     private bool _liveConnectionReady;
     private bool _liveCompleting;
     private bool _liveClosing;
@@ -217,6 +220,11 @@ public partial class MainWindow
             _liveSession.Start(start);
             _liveReceiver!.AttachSession(_liveSession);
 
+            var startStatus = _liveReceiver.DriverStatus;
+            _liveReceivedAtExperimentStart = startStatus.ReceivedFrames;
+            _liveLostAtExperimentStart = startStatus.LostFrames;
+            _liveErrorsAtExperimentStart = startStatus.ErrorFrames;
+
             if (IsReplaySource)
             {
                 var rawPath = CreateLiveCapturePath("replay", start);
@@ -243,6 +251,7 @@ public partial class MainWindow
         if (_liveSession is null) return;
         _liveSession.Abort(DateTimeOffset.UtcNow);
         _liveReceiver?.AttachSession(null);
+        RecordAbortedLiveMetadata(_liveSession);
         LiveQualityText.Text = "ABORTED: опыт остановлен оператором; кандидаты не сформированы.";
         LiveInstructionText.Text = "Эксперимент остановлен. Верните органы управления в безопасное положение.";
         UpdateLiveControls();
@@ -317,6 +326,16 @@ public partial class MainWindow
             var rawPath = _liveReceiver.RawCapturePath ?? string.Empty;
             var captureStart = _liveReceiver.RawCaptureStart ?? session.Boundaries!.BaselineStart;
             var driverStatus = _liveReceiver.DriverStatus;
+            var lostDuringExperiment = Math.Max(0, driverStatus.LostFrames - _liveLostAtExperimentStart);
+            var errorsDuringExperiment = Math.Max(0, driverStatus.ErrorFrames - _liveErrorsAtExperimentStart);
+            if (lostDuringExperiment > 0)
+                session.AddWarning(LiveSessionWarningCode.FramesLost,
+                    $"Во время опыта потеряно кадров: {lostDuringExperiment}.",
+                    session.Boundaries!.PostActionEnd, invalidatesExperiment: true);
+            if (errorsDuringExperiment > 0)
+                session.AddWarning(LiveSessionWarningCode.BusError,
+                    $"Во время опыта зарегистрировано ошибок CAN: {errorsDuringExperiment}.",
+                    session.Boundaries!.PostActionEnd, invalidatesExperiment: true);
             await _liveReceiver.FlushCaptureAsync();
             var result = await Task.Run(session.Analyze);
             _liveReceiver.AttachSession(null);
@@ -342,11 +361,12 @@ public partial class MainWindow
                 PostActionEnd = boundaries.PostActionEnd,
                 OperatorInstruction = result.Configuration.OperatorInstruction,
                 Outcome = result.Outcome.ToString().ToUpperInvariant(),
-                ReceivedFrames = driverStatus.ReceivedFrames,
+                ReceivedFrames = Math.Max(captured.Count,
+                    driverStatus.ReceivedFrames - _liveReceivedAtExperimentStart),
                 StandardFrames = captured.LongCount(frame => !frame.IsExtended),
                 ExtendedFrames = captured.LongCount(frame => frame.IsExtended),
-                LostFrames = driverStatus.LostFrames,
-                ErrorFrames = driverStatus.ErrorFrames,
+                LostFrames = lostDuringExperiment,
+                ErrorFrames = errorsDuringExperiment,
                 QualityWarnings = result.Warnings.Select(warning => warning.Message)
                     .Concat(result.Analysis.Quality.Issues
                         .Where(issue => issue.Severity != ExperimentQualitySeverity.Information)
@@ -561,6 +581,39 @@ public partial class MainWindow
         LiveCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
         LiveSaveButton.IsEnabled = false;
         LiveRepeatTextBox.Text = "1";
+    }
+
+    private void RecordAbortedLiveMetadata(LiveExperimentSession session)
+    {
+        if (_liveCaptureMetadata.Any(item => item.SessionId == session.SessionId) || session.Boundaries is null) return;
+        var status = _liveReceiver?.DriverStatus ??
+            new CanDriverStatus(false, IsReplaySource, 0, 0, 0, "DISCONNECTED");
+        var boundaries = session.Boundaries;
+        _liveCaptureMetadata.Add(new LiveCaptureMetadata
+        {
+            SessionId = session.SessionId,
+            RepeatNumber = session.Configuration.RepeatNumber,
+            DriverId = _liveDriver?.Id ?? string.Empty,
+            ChannelId = (LiveChannelCombo.SelectedItem as CanChannelDescriptor)?.Id ?? string.Empty,
+            Bitrate = LiveBitrateCombo.SelectedItem is int bitrate ? bitrate : 250_000,
+            ListenOnlyConfirmed = status.ListenOnlyConfirmed,
+            RawCapturePath = _liveReceiver?.RawCapturePath ?? string.Empty,
+            CaptureStart = _liveReceiver?.RawCaptureStart ?? boundaries.BaselineStart,
+            BaselineStart = boundaries.BaselineStart,
+            BaselineEnd = boundaries.BaselineEnd,
+            ActionStart = boundaries.ActionStart,
+            ActionEnd = boundaries.ActionEnd,
+            PostActionEnd = boundaries.PostActionEnd,
+            OperatorInstruction = session.Configuration.OperatorInstruction,
+            Outcome = "ABORTED",
+            ReceivedFrames = Math.Max(0, status.ReceivedFrames - _liveReceivedAtExperimentStart),
+            StandardFrames = Interlocked.Read(ref _liveStandardFrames),
+            ExtendedFrames = Interlocked.Read(ref _liveExtendedFrames),
+            LostFrames = Math.Max(0, status.LostFrames - _liveLostAtExperimentStart),
+            ErrorFrames = Math.Max(0, status.ErrorFrames - _liveErrorsAtExperimentStart),
+            QualityWarnings = session.Warnings.Select(warning => warning.Message).ToList()
+        });
+        LiveSaveButton.IsEnabled = true;
     }
 
     private void UpdateLiveControls()

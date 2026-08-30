@@ -372,6 +372,37 @@ Require(abortedLiveSession.State == LiveExperimentState.Aborted &&
         abortedLiveSession.Outcome == LiveExperimentOutcome.Aborted,
     "Operator Abort did not terminate the Live experiment safely.");
 
+var lossyLiveSession = new LiveExperimentSession(new LiveExperimentConfiguration());
+lossyLiveSession.Start(liveFixtureFrames[0].Timestamp);
+foreach (var frame in liveFixtureFrames) lossyLiveSession.AppendFrame(frame);
+lossyLiveSession.AddWarning(LiveSessionWarningCode.FramesLost,
+    "Synthetic lost frame", liveFixtureFrames[^1].Timestamp, invalidatesExperiment: true);
+var lossyLiveResult = lossyLiveSession.Analyze();
+Require(lossyLiveResult.Outcome == LiveExperimentOutcome.Invalid &&
+        lossyLiveResult.Analysis.Candidates.Count == 0,
+    "A Live experiment with lost frames produced confident candidates.");
+
+var disconnectRawPath = Path.Combine(Path.GetTempPath(), $"cranecan-disconnect-{Guid.NewGuid():N}.trc");
+try
+{
+    await using var disconnectDriver = new DisconnectingCanDriver(now);
+    await using var disconnectReceiver = new LiveCanReceiver(disconnectDriver);
+    var disconnectSession = new LiveExperimentSession(new LiveExperimentConfiguration());
+    disconnectSession.Start(now);
+    disconnectReceiver.AttachSession(disconnectSession);
+    await disconnectReceiver.StartAsync(new CanChannelSettings("disconnect-test", 250_000),
+        disconnectRawPath, now);
+    await disconnectReceiver.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+    Require(disconnectSession.State == LiveExperimentState.Aborted &&
+            disconnectSession.Outcome == LiveExperimentOutcome.Invalid &&
+            disconnectSession.Warnings.Any(warning => warning.Code == LiveSessionWarningCode.DriverDisconnected),
+        "Unexpected driver disconnect did not invalidate the active Live experiment.");
+}
+finally
+{
+    if (File.Exists(disconnectRawPath)) File.Delete(disconnectRawPath);
+}
+
 Require(PcanBasicCanDriver.TryMapBitrate(250_000, out var pcan250) && pcan250 == 0x011C &&
         PcanBasicCanDriver.TryMapBitrate(500_000, out _) &&
         !PcanBasicCanDriver.TryMapBitrate(123_456, out _),
@@ -868,5 +899,51 @@ static async Task<Exception?> CaptureExceptionAsync(Func<Task> action)
     catch (Exception exception)
     {
         return exception;
+    }
+}
+
+file sealed class DisconnectingCanDriver(DateTimeOffset timestamp) : ICanDriver, ICanDriverDiagnostics
+{
+    private bool _open;
+    public string Id => "disconnect-test";
+    public string DisplayName => "Synthetic disconnect";
+    public BusProtocol Protocol => BusProtocol.ClassicalCan;
+    public bool SupportsListenOnly => true;
+    public bool IsOpen => _open;
+    public Task<IReadOnlyList<CanChannelDescriptor>> DiscoverChannelsAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<CanChannelDescriptor>>([new("disconnect-test", "Synthetic disconnect")]);
+    public Task OpenAsync(CanChannelSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (!settings.ListenOnly) throw new InvalidOperationException();
+        _open = true;
+        return Task.CompletedTask;
+    }
+    public async IAsyncEnumerable<CanFrame> ReadFramesAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return new CanFrame
+        {
+            Timestamp = timestamp,
+            Channel = 0,
+            Id = 0x123,
+            Data = [0x00],
+            Protocol = BusProtocol.ClassicalCan,
+            Direction = CanDirection.Rx
+        };
+        await Task.Yield();
+        throw new IOException("Synthetic PCAN unplugged");
+    }
+    public Task CloseAsync(CancellationToken cancellationToken = default)
+    {
+        _open = false;
+        return Task.CompletedTask;
+    }
+    public CanDriverStatus GetStatus() => new(_open, true, _open ? 1 : 0, 0, 0,
+        _open ? "CONNECTED" : "DISCONNECTED");
+    public ValueTask DisposeAsync()
+    {
+        _open = false;
+        return ValueTask.CompletedTask;
     }
 }
