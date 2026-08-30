@@ -107,9 +107,10 @@ software, измерение или пользовательское подтв�
 
 ## Безопасность
 
-CraneCAN 0.6 работает только с сохранёнными трассами. В приложении нет CAN Tx и
-live PCAN-драйвера. PCAN-View записывает Classical CAN в Listen-only, CraneCAN
-анализирует `.trc`. Программа не предлагает прямую подачу питания, обход
+Offline pipeline по-прежнему работает только с сохранёнными трассами. В 0.7
+добавлен отдельный Live-источник PCAN, но он требует аппаратно подтверждённый
+Listen-only, а его сборка не содержит transmit API. PCAN-View остаётся основным
+полевым регистратором. Программа не предлагает прямую подачу питания, обход
 блокировок или отключение защит.
 
 ## SOOSAN regression
@@ -119,10 +120,10 @@ SOOSAN JK1200A используется только как реальная reg
 `0x18F`, `DATA[1] 00 → 02`, `DATA[2] 00 → C8`, Extended 29-bit HYDAC IDs,
 разделение Standard/Extended, ramp/transition и noise ranking.
 
-## Границы первого этапа 0.6
+## Состояние в 0.7
 
-Реализованы offline Guided UI, несколько повторов, temporal analysis,
-score/explanation, quality checks, timeline data model, profile и experiment
-persistence. На следующие этапы оставлены интерактивный график, event-chain
-GOOD/FAULT divergence, `.canproject`, Signal Builder, streaming parsing больших
-TRC, DBC/J1939 decoding и listen-only live capture.
+Offline Guided UI, повторы, temporal analysis, score/explanation, quality
+checks, profile и experiment persistence дополнены общим Live/Replay pipeline.
+На следующие этапы оставлены интерактивный график, event-chain GOOD/FAULT
+divergence, `.canproject`, Signal Builder, streaming parsing больших TRC,
+DBC/J1939 decoding, adaptive experiment selection и AI integration.

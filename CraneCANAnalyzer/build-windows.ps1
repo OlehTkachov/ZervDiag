@@ -3,12 +3,14 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appProject = Join-Path $projectRoot "src\CraneCAN.App\CraneCAN.App.csproj"
 $smokeProject = Join-Path $projectRoot "tests\CraneCAN.SmokeTests\CraneCAN.SmokeTests.csproj"
-$publishDirectory = Join-Path $projectRoot "publish\generic-guided-win-x64"
-$publishedExe = Join-Path $publishDirectory "CraneCAN.exe"
+$publishDirectory = Join-Path $projectRoot "publish\live-guided-win-x64"
+$publishedExe = Join-Path $publishDirectory "CraneCAN.Live.exe"
 $publishedReadme = Join-Path $publishDirectory "README.md"
 $publishedFieldGuide = Join-Path $publishDirectory "docs\SOOSAN_FIELD_CAPTURE.md"
 $publishedGuidedGuide = Join-Path $publishDirectory "docs\GENERIC_GUIDED_DIAGNOSTICS.md"
+$publishedLiveGuide = Join-Path $publishDirectory "docs\LIVE_GUIDED_DIAGNOSTICS.md"
 $publishedFixture = Join-Path $publishDirectory "samples\soosan_mixed.trc"
+$publishedLiveFixture = Join-Path $publishDirectory "samples\live_guided_demo.trc"
 
 function Assert-DotNetSuccess([string]$step) {
     if ($LASTEXITCODE -ne 0) {
@@ -29,7 +31,7 @@ if (-not $sdkVersion.StartsWith("8.")) {
 }
 Write-Host ".NET SDK found: $sdkVersion"
 
-Write-Host "Restoring, building and running all smoke tests (ONK + Generic CAN)..."
+Write-Host "Restoring, building and running all smoke tests (ONK + Generic + Live Guided)..."
 & dotnet restore $smokeProject
 Assert-DotNetSuccess "Smoke-test restore"
 & dotnet build $smokeProject -c Release --no-restore
@@ -38,7 +40,7 @@ Assert-DotNetSuccess "Smoke-test build"
 Assert-DotNetSuccess "Smoke tests"
 
 if (Test-Path -LiteralPath $publishDirectory) {
-    Write-Host "Removing the previous Generic Guided build..."
+    Write-Host "Removing the previous Live Guided build..."
     Remove-Item -LiteralPath $publishDirectory -Recurse -Force
 }
 
@@ -46,7 +48,7 @@ Write-Host "Restoring self-contained Windows x64 assets..."
 & dotnet restore $appProject -r win-x64 -p:SelfContained=true
 Assert-DotNetSuccess "Windows x64 restore"
 
-Write-Host "Publishing CraneCAN 0.6 Generic Guided Diagnostics..."
+Write-Host "Publishing CraneCAN 0.7 Live Guided Diagnostics..."
 & dotnet publish $appProject `
     -c Release `
     -r win-x64 `
@@ -70,17 +72,23 @@ if (-not (Test-Path -LiteralPath $publishedFieldGuide)) {
 if (-not (Test-Path -LiteralPath $publishedGuidedGuide)) {
     throw "Guided diagnostics guide was not copied to the publish directory: $publishedGuidedGuide"
 }
+if (-not (Test-Path -LiteralPath $publishedLiveGuide)) {
+    throw "Live Guided operator guide was not copied to the publish directory: $publishedLiveGuide"
+}
 if (-not (Test-Path -LiteralPath $publishedFixture)) {
     throw "SOOSAN control TRC was not copied to the publish directory: $publishedFixture"
 }
+if (-not (Test-Path -LiteralPath $publishedLiveFixture)) {
+    throw "Live Guided replay fixture was not copied to the publish directory: $publishedLiveFixture"
+}
 
 $hash = (Get-FileHash -LiteralPath $publishedExe -Algorithm SHA256).Hash.ToLowerInvariant()
-$hashLine = "$hash *CraneCAN.exe"
+$hashLine = "$hash *CraneCAN.Live.exe"
 Set-Content -LiteralPath (Join-Path $publishDirectory "SHA256SUMS.txt") -Value $hashLine -Encoding ascii
 
 Write-Host ""
 Write-Host "READY: $publishDirectory" -ForegroundColor Green
-Write-Host "Run: CraneCAN.exe"
-Write-Host "Read first: README.md and docs\GENERIC_GUIDED_DIAGNOSTICS.md"
+Write-Host "Run: CraneCAN.Live.exe"
+Write-Host "Read first: README.md and docs\LIVE_GUIDED_DIAGNOSTICS.md"
 Write-Host "The target PC does not need .NET Runtime. Copy the entire publish folder."
-Write-Host "CraneCAN is offline-only: PCAN-View records TRC in Listen-only mode."
+Write-Host "Start with samples\live_guided_demo.trc in Replay. Live PCAN is receive-only."

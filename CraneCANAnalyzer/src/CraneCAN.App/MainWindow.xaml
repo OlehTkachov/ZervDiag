@@ -1,7 +1,7 @@
 <Window x:Class="CraneCAN.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="CraneCAN 0.6 — Generic Guided Diagnostics"
+        Title="CraneCAN 0.7 — Live Guided Diagnostics"
         Height="820"
         Width="1400"
         MinHeight="650"

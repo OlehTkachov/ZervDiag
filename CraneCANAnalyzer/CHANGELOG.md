@@ -1,5 +1,16 @@
 # История изменений
 
+## 0.7.0 — Live Guided Diagnostics
+
+- Добавлены общий Live CAN buffer и state machine REFERENCE/ACTION/POST.
+- Добавлен ReplayCanDriver для real-time, accelerated и step-проверки без машины.
+- Добавлен receive-only PCAN-Basic driver с аппаратной установкой и проверкой Listen-only.
+- Добавлен отдельный крупный операторский экран Live Guided Diagnostics.
+- Добавлены непрерывная запись raw TRC, Abort/Invalid и обработка разрыва связи.
+- Live-повторы передаются существующему Generic Analyzer без второго анализатора.
+- `.canexperiment` расширен live metadata и повторно открывается общим pipeline.
+- Добавлена полная regression fixture и smoke tests Live Guided; ONK тесты сохранены.
+
 ## 0.6.0 — Generic Guided Diagnostics
 
 - Добавлен Guided workflow REFERENCE/ACTION для неизвестной машины.

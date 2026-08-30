@@ -1,98 +1,107 @@
-# CraneCAN 0.6 — Generic Guided Diagnostics
+# CraneCAN 0.7 — Live Guided Diagnostics
 
-Универсальный offline-инструмент для исследования неизвестных Classical CAN
-сетей через понятные физические эксперименты. CraneCAN помогает найти, какие
-CAN-изменения совпали с кнопкой, джойстиком, концевиком, реле, клапаном или
-режимом машины, не требуя заранее знать ID, byte, bit, DBC, J1939 или scaling.
+CraneCAN выполняет управляемые диагностические эксперименты в неизвестной
+Classical CAN-сети: записывает спокойное состояние `REFERENCE`, показывает
+оператору инструкцию, записывает `ACTION` и `POST`, затем передаёт эти окна
+существующему Generic Analyzer. Результат — ранжированные проверяемые
+кандидаты, а не автоматическое утверждение о назначении сигнала.
 
-> **Безопасность:** в CraneCAN отсутствуют CAN Tx и live-драйвер. PCAN-View
-> записывает исходный `.trc` в Listen-only, CraneCAN анализирует сохранённый
-> файл. Программа не предлагает обход защит машины.
+> **Безопасность:** Live-драйвер работает только в аппаратно подтверждённом
+> `LISTEN ONLY`. В сборке нет вызова PCAN Write/Send и нет пользовательских
+> функций CAN Tx. CraneCAN не управляет машиной и не предлагает обход защит.
 
-## Быстрый запуск диагностики
+## Сначала проверить без машины
 
-1. Запустить `CraneCAN.exe`.
-2. На первой вкладке **Диагностика** нажать **Открыть PCAN-View TRC**.
-3. Ответить на вопрос «Что вы хотите найти?» и назвать физическое действие,
-   например `Joystick EXTEND`.
-4. Указать спокойное окно `REFERENCE` и окно `ACTION` в миллисекундах от начала
-   трассы. Примерное время действия можно оставить пустым или задать с `±`.
-5. Нажать **Добавить повтор**. Для надёжного вывода добавить 3 опыта.
-6. Нажать **АНАЛИЗИРОВАТЬ**.
-7. Выбрать кандидата и прочитать объяснение score: переход, время реакции,
-   agreement, repeatability, возврат и штрафы.
-8. Добавить сигнал в профиль как `CANDIDATE`, `PROBABLE` или после
-   пользовательского подтверждения — `CONFIRMED`.
-9. Сохранить `.craneprofile` и `.canexperiment`.
+1. Запустить `CraneCAN.Live.exe`.
+2. Открыть вкладку **LIVE GUIDED**.
+3. Источник: **TRC Replay — без машины**.
+4. Нажать **TRC для Replay…** и выбрать
+   `samples\live_guided_demo.trc`.
+5. Нажать **ПОДКЛЮЧИТЬ**, затем **START GUIDED EXPERIMENT**.
+6. Дождаться автоматического прохождения `REFERENCE → ожидание → ACTION →
+   POST → ANALYZING → COMPLETED`.
+7. Убедиться, что найден кандидат Standard `0x18F`, включая переход
+   `DATA[1] 00→02`. Сохранить `.canexperiment` и открыть его на вкладке
+   **Диагностика**.
 
-Главный экран показывает человекочитаемый вывод до HEX. Полные кадры,
-timestamp, Δt, DLC, DATA, XOR, bit transitions и статистика остаются доступны
-на Expert-вкладках.
+Replay использует тот же `ICanDriver`, потоковый буфер, state machine,
+сохранение и Generic Analyzer, что и реальный PCAN.
 
-## Что работает в первом этапе 0.6
+## Реальный PCAN-USB
 
-- PCAN-View TRC 1.0/1.1/1.2/1.3/2.x/3.0;
-- Standard 11-bit и Extended 29-bit Classical CAN;
-- однофайловые REFERENCE/ACTION окна и прежнее сравнение двух TRC;
-- несколько Guided-повторов и repeatability `N/M`;
-- поиск фронта около примерного времени с допуском `±`;
-- stable bit 0→1/1→0, stable byte, different DLC, появление/исчезновение ID;
-- temporal sequence, min/max, stabilization, return, rate и monotonicity;
-- различение analog ramp и нестабильного noise;
-- прозрачный score 0–100 с каждым вкладом;
-- проверки пустых/коротких/пересекающихся окон и разных buses;
-- статусы `UNKNOWN/CANDIDATE/PROBABLE/CONFIRMED/REJECTED`;
-- evidence и открытый JSON machine profile;
-- сохранение/открытие эксперимента со ссылками на внешние TRC;
-- прежний полный Generic CSV export;
-- прежние ONK-160 и SOOSAN regression smoke tests.
+На Windows должен быть установлен официальный x64-драйвер PEAK с
+`PCANBasic.dll`.
 
-Архитектура и модель доказательств описаны в
-[`docs/GENERIC_GUIDED_DIAGNOSTICS.md`](docs/GENERIC_GUIDED_DIAGNOSTICS.md).
+1. Физически подключить PCAN параллельно к проверенной CAN-линии. Штатное
+   соединение машины сохранить.
+2. Не включать дополнительную терминацию адаптера, если шина уже имеет
+   штатные два терминатора.
+3. На вкладке **LIVE GUIDED** выбрать **PEAK PCAN-USB**.
+4. Выбрать bitrate; для SOOSAN JK1200A — `250000`.
+5. Нажать **Найти каналы**, выбрать PCAN-USB и нажать **ПОДКЛЮЧИТЬ**.
+6. Продолжать только если постоянно показаны `CONNECTED` и `LISTEN ONLY`.
+   Если пассивный режим не подтверждён, CraneCAN сам закроет канал.
+7. Указать одно действие, инструкцию, номер повтора и длительности. Нажать
+   **START GUIDED EXPERIMENT**.
+8. Выполнять только крупную текущую инструкцию на экране. При любой
+   неопределённости нажать **ABORT / STOP**.
+9. Для repeatability повторить один и тот же опыт три раза, не меняя условий.
+10. Сохранить `.canexperiment`. Полный сырой TRC сохраняется независимо в
+    `Документы\CraneCAN\LiveCaptures`.
 
-## Expert CAN
+Live PCAN не является обязательным для ближайшего полигона: PCAN-View остаётся
+главным регистратором, а стабильный offline-анализ `.trc` сохранён целиком.
 
-Существующие вкладки сохраняют полный технический доступ: исходные кадры,
-фильтры ID/format, frequency/period statistics, modal comparator, XOR, bit
-transitions и полный CSV с шумовыми и неизменившимися строками.
+## Что реализовано
 
-## SOOSAN regression fixture
+- `ReplayCanDriver`: real-time, accelerated и step;
+- `PcanBasicCanDriver`: PCAN-USB, Classical CAN, 11/29-bit, timestamp, DLC,
+  DATA, отмена, безопасное закрытие и диагностика потерь/ошибок;
+- аппаратная установка и обратная проверка `LISTEN ONLY`;
+- отсутствие transmit API в PCAN-сборке;
+- потоковый `LiveCanBuffer` на 120 секунд с ограничением памяти;
+- непрерывное сохранение сырого PCAN-View-совместимого TRC;
+- состояния `Idle/Baseline/WaitingForAction/Action/PostAction/Analyzing/
+  Completed/Aborted` и точные timestamps переходов;
+- конфигурируемые длительности и Generic-названия действий;
+- автоматическое подавление кандидатов у `INVALID/ABORTED` опыта;
+- несколько повторов, repeatability, temporal analysis и confidence score;
+- сохранение raw capture, границ, канала, bitrate, инструкции, счётчиков,
+  quality warnings и кандидатов в открытом `.canexperiment`;
+- повторное открытие Live-эксперимента через общий offline pipeline;
+- прежний импорт PCAN-View TRC 1.0–3.0, Generic CAN экран, сравнение окон,
+  Machine Profile, SOOSAN и ONK regression tests.
 
-SOOSAN не является специальной логикой CraneCAN. Контрольный файл
-`samples/soosan_mixed.trc` проверяет Generic Core на реальных данных:
-
-```text
-Standard 0x18F
-08 00 00 00 00  →  08 02 C8 00 00
-```
-
-Для проверки задать REFERENCE `0–40 ms`, ACTION `200–240 ms`. Должны быть
-найдены `DATA[1] 00→02` и `DATA[2] 00→C8`. В той же fixture сохраняются
-Extended HYDAC/J1939 кадры, включая `0x0CFF5321`.
+Подробный безопасный регламент: [`docs/LIVE_GUIDED_DIAGNOSTICS.md`](docs/LIVE_GUIDED_DIAGNOSTICS.md).
+Архитектура аналитики: [`docs/GENERIC_GUIDED_DIAGNOSTICS.md`](docs/GENERIC_GUIDED_DIAGNOSTICS.md).
 
 ## Сборка на Windows
 
-Нужны Windows 10/11 x64 и .NET 8 SDK:
+Нужны Windows 10/11 x64, PowerShell и .NET 8 SDK:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\build-windows.ps1
 ```
 
-Скрипт собирает и запускает smoke tests, затем публикует автономную папку:
+Скрипт сначала собирает и запускает все ONK/Generic/Live smoke tests, а только
+затем создаёт автономную папку:
 
 ```text
-publish\generic-guided-win-x64
+publish\live-guided-win-x64
 ```
 
-Запуск: `CraneCAN.exe`. На полевом ноутбуке .NET Runtime не требуется;
-переносить нужно всю папку публикации.
+Запуск: `CraneCAN.Live.exe`. На целевом ноутбуке .NET Runtime и Python не
+нужны; переносить следует всю папку. Для реального Live нужен установленный
+официальный PEAK Device Driver x64. Для Replay он не нужен.
 
-## Известные ограничения
+## Известные ограничения 0.7
 
-- импорт пока ограничен 1 000 000 обычных CAN-кадров;
-- parser возвращает список кадров; streaming/progress/cancellation — следующий этап;
-- timeline хранится в Core, но отдельная кликабельная шкала ещё не выведена;
-- графики, event-chain GOOD/FAULT, `.canproject`, Signal Builder, DBC/J1939
-  decoding и live PCAN не входят в первый этап;
-- приложение не выполняет CAN передачу.
+- физический PCAN-USB нельзя аппаратно проверить в Linux-среде разработки;
+  первый реальный приём следует проверять в цеху, не на полигоне;
+- PCAN-View и CraneCAN могут конфликтовать за канал либо за режим/bitrate;
+  при конфликте главным регистратором остаётся PCAN-View;
+- J1939/DBC-декодирование, AI/GPT, голос, автоматический выбор следующего
+  эксперимента и CAN Tx не входят в этот milestone;
+- назначение сигнала остаётся `CANDIDATE/PROBABLE`, пока пользователь не
+  добавил независимое evidence и явно не подтвердил его.

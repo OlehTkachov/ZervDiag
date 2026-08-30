@@ -6,13 +6,13 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>CraneCAN</AssemblyName>
+    <AssemblyName>CraneCAN.Live</AssemblyName>
     <RootNamespace>CraneCAN.App</RootNamespace>
-    <Version>0.6.0</Version>
-    <AssemblyVersion>0.6.0.0</AssemblyVersion>
-    <FileVersion>0.6.0.0</FileVersion>
-    <Product>CraneCAN — Generic Guided Diagnostics</Product>
-    <Description>Универсальная управляемая offline-диагностика неизвестных Classical CAN сетей.</Description>
+    <Version>0.7.0</Version>
+    <AssemblyVersion>0.7.0.0</AssemblyVersion>
+    <FileVersion>0.7.0.0</FileVersion>
+    <Product>CraneCAN — Live Guided Diagnostics</Product>
+    <Description>Пассивная управляемая Live/Replay-диагностика неизвестных Classical CAN сетей.</Description>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -42,11 +42,23 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>docs\GENERIC_GUIDED_DIAGNOSTICS.md</TargetPath>
     </Content>
+    <Content Include="..\..\docs\LIVE_GUIDED_DIAGNOSTICS.md">
+      <Link>docs\LIVE_GUIDED_DIAGNOSTICS.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\LIVE_GUIDED_DIAGNOSTICS.md</TargetPath>
+    </Content>
     <Content Include="..\..\tests\CraneCAN.SmokeTests\Fixtures\soosan_mixed.trc">
       <Link>samples\soosan_mixed.trc</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>samples\soosan_mixed.trc</TargetPath>
+    </Content>
+    <Content Include="..\..\tests\CraneCAN.SmokeTests\Fixtures\live_guided_demo.trc">
+      <Link>samples\live_guided_demo.trc</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>samples\live_guided_demo.trc</TargetPath>
     </Content>
   </ItemGroup>
 </Project>
