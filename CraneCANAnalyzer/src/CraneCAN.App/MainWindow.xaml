@@ -496,6 +496,8 @@
                                 <CheckBox x:Name="OnlySignificantCheckBox" Content="Только значимые изменения"
                                           IsChecked="True" VerticalAlignment="Center" Margin="8,4"
                                           Checked="ComparisonFilter_Changed" Unchecked="ComparisonFilter_Changed" />
+                                <Button Content="GOOD/FAULT: первое расхождение"
+                                        Click="FirstDivergenceButton_Click" />
                                 <Button x:Name="SaveComparisonButton" Content="Сохранить результат CSV"
                                         Click="SaveComparisonButton_Click" IsEnabled="False" />
                             </WrapPanel>
