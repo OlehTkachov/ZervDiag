@@ -882,6 +882,7 @@ FirstDivergenceTests.Run();
 await ConfigurationSnapshotTests.RunAsync();
 ConfigurationSnapshotComparisonTests.Run();
 NodeHealthTests.Run();
+IncidentTransitionTests.Run();
 Console.WriteLine("CraneCAN smoke tests passed.");
 return;
 

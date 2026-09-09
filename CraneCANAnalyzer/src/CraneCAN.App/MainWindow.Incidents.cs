@@ -171,6 +171,12 @@ public partial class MainWindow
         timeline.Columns.Add(new DataGridTextColumn { Header = "Событие", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.Kind)), Width = 150 });
         timeline.Columns.Add(new DataGridTextColumn { Header = "Детали", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.Details)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
 
+        var analyze = new Button
+        {
+            Content = "Анализ изменений у отметки",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4)
+        };
         var openCapture = new Button
         {
             Content = "Открыть capture.trc в анализаторе",
@@ -188,6 +194,7 @@ public partial class MainWindow
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(analyze);
         buttons.Children.Add(openCapture);
         buttons.Children.Add(close);
 
@@ -215,6 +222,12 @@ public partial class MainWindow
         };
 
         close.Click += (_, _) => window.Close();
+        analyze.Click += async (_, _) =>
+        {
+            analyze.IsEnabled = false;
+            try { await AnalyzeIncidentTransitionAsync(package, window); }
+            finally { analyze.IsEnabled = true; }
+        };
         openCapture.Click += async (_, _) =>
         {
             openCapture.IsEnabled = false;
