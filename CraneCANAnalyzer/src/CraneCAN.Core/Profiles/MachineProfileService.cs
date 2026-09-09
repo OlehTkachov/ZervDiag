@@ -9,7 +9,9 @@ public static class MachineProfileService
         GuidedCandidate candidate,
         string name,
         SignalKnowledgeState status,
-        string? notes = null)
+        string? notes = null,
+        GuidedExperiment? experiment = null,
+        string? experimentPath = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(candidate);
@@ -20,10 +22,22 @@ public static class MachineProfileService
                 "Для добавления сигнала используйте CANDIDATE, PROBABLE или CONFIRMED.");
         }
 
+        var captures = experiment?.LiveCaptures ?? [];
+        var hasReplay = captures.Any(item => item.DriverId == "pcan-trc-replay");
+        var origin = captures.Count == 0 ? "unknown" :
+            captures.All(item => item.DriverId == "pcan-trc-replay") ? "replay" :
+            captures.All(item => item.DriverId == "peak-pcan-basic") ? "livePcan" : "mixedOrUnknown";
         var evidence = new SignalEvidence
         {
+            ExperimentId = experiment?.ExperimentId,
+            ExperimentPath = experimentPath,
+            CaptureOrigin = origin,
+            Repeats = experiment?.Repeats.ToList() ?? [],
+            Captures = captures.ToList(),
             Kind = EvidenceKind.RepeatedExperiment,
-            Description = $"Повторяемость {candidate.RepeatabilityCount}/{candidate.RepeatCount}; score {candidate.Score}/100",
+            Description = $"Повторяемость {candidate.RepeatabilityCount}/{candidate.RepeatCount}; score {candidate.Score}/100. " +
+                (hasReplay ? "REPLAY: воспроизведение записи; независимые физические опыты не подтверждены." :
+                 "Независимость физических опытов требует проверки источников."),
             SourceReference = candidate.StableKey
         };
         var evidenceItems = new List<SignalEvidence> { evidence };
@@ -84,10 +98,24 @@ public static class MachineProfileService
 
         return profile with
         {
+            ProgramVersion = "0.7.0",
+            Bitrate = ResolveBitrate(profile, experiment),
             KnownSignals = known,
             ExperimentalSignals = experimental,
             UpdatedAt = DateTimeOffset.UtcNow
         };
+    }
+
+    private static int? ResolveBitrate(MachineProfile profile, GuidedExperiment? experiment)
+    {
+        // Replay bitrate is a UI setting, not evidence of the physical bus bitrate.
+        if (experiment is null || experiment.Bus != profile.CanBusName || experiment.LiveCaptures.Count == 0)
+            return profile.Bitrate;
+        if (experiment.LiveCaptures.Any(item => item.DriverId != "peak-pcan-basic" || item.Bitrate <= 0))
+            return profile.Bitrate;
+        var rates = experiment.LiveCaptures.Select(item => item.Bitrate).Distinct().ToArray();
+        if (rates.Length != 1 || (profile.Bitrate.HasValue && profile.Bitrate != rates[0])) return profile.Bitrate;
+        return rates[0];
     }
 
     public static MachineProfile PromoteSignal(

@@ -5,7 +5,7 @@ namespace CraneCAN.Core.Live;
 
 public enum LiveExperimentState { Idle, Baseline, WaitingForAction, Action, PostAction, Analyzing, Completed, Aborted }
 public enum LiveExperimentOutcome { Pending, Valid, Invalid, Aborted }
-public enum LiveSessionWarningCode { NoFrames, DriverDisconnected, CanStreamStopped, BusError, FramesLost, OperatorAborted, InvalidSequence }
+public enum LiveSessionWarningCode { NoFrames, DriverDisconnected, CanStreamStopped, BusError, FramesLost, OperatorAborted, InvalidSequence, ReplayExhausted }
 
 public sealed record LiveExperimentConfiguration
 {

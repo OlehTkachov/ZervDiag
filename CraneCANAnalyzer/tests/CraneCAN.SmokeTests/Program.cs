@@ -313,11 +313,23 @@ try
     var liveSession = new LiveExperimentSession(liveConfiguration);
     await using var liveReplay = new ReplayCanDriver(liveFixturePath, ReplayTimingMode.Accelerated, 100_000);
     await using var liveReceiver = new LiveCanReceiver(liveReplay);
+    var incidentMarked = false;
+    liveReceiver.FrameReceived += frame =>
+    {
+        if (!incidentMarked && frame.Timestamp >= liveStart.AddSeconds(10))
+        {
+            liveReceiver.Incidents.Mark("Replay incident at 10 seconds");
+            incidentMarked = true;
+        }
+    };
     liveReceiver.AttachSession(liveSession);
     liveSession.Start(liveStart);
     await liveReceiver.StartAsync(new CanChannelSettings("replay-trc", 250_000, ListenOnly: true),
         liveRawPath, liveStart);
     await liveReceiver.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+    Require(liveReceiver.Incidents.LastIncident is { Complete: true } &&
+            liveReceiver.Incidents.LastIncident.Frames.Count > 0,
+        "Receiver did not collect an independent pre-fault incident during Guided replay.");
     Require(liveSession.State == LiveExperimentState.Analyzing,
         "Complete replay did not reach the Analyzing state.");
     var liveResult = liveSession.Analyze();
@@ -355,6 +367,40 @@ try
 finally
 {
     if (File.Exists(liveRawPath)) File.Delete(liveRawPath);
+}
+
+// Replay starts at the same trace timestamp every time; raw recordings must remain distinct.
+var captureDirectory = Path.Combine(Path.GetTempPath(), $"cranecan-no-overwrite-{Guid.NewGuid():N}");
+try
+{
+    var names = Enumerable.Range(0, 3)
+        .Select(_ => LiveTrcWriter.CreateCaptureFileName("replay", DateTimeOffset.UnixEpoch)).ToArray();
+    Require(names.Distinct().Count() == 3, "Identical replay start times produced duplicate raw filenames.");
+    var snapshots = new Dictionary<string, byte[]>();
+    foreach (var name in names)
+    {
+        var path = Path.Combine(captureDirectory, name);
+        await using (var writer = await LiveTrcWriter.CreateAsync(path, liveFixtureFrames[0].Timestamp))
+        {
+            foreach (var frame in liveFixtureFrames) await writer.AppendAsync(frame);
+        }
+        snapshots[path] = await File.ReadAllBytesAsync(path);
+    }
+    foreach (var (path, bytes) in snapshots)
+    {
+        var collision = await CaptureExceptionAsync(async () =>
+        {
+            await using var duplicate = await LiveTrcWriter.CreateAsync(path, DateTimeOffset.UnixEpoch);
+        });
+        Require(collision is IOException && bytes.SequenceEqual(await File.ReadAllBytesAsync(path)),
+            "An existing raw recording was not protected against overwrite.");
+        Require((await PcanTrcCodec.LoadAsync(path)).Count == liveFixtureFrames.Count,
+            "Independent replay raw recording lost frames.");
+    }
+}
+finally
+{
+    if (Directory.Exists(captureDirectory)) Directory.Delete(captureDirectory, recursive: true);
 }
 
 var emptyLiveSession = new LiveExperimentSession(new LiveExperimentConfiguration());
@@ -652,6 +698,46 @@ try
             restoredProfile.ExperimentalSignals.Single().Evidence.Single().Kind == EvidenceKind.RepeatedExperiment,
         "Machine profile or evidence JSON round-trip failed.");
 
+    var replayEvidenceExperiment = new GuidedExperiment
+    {
+        Bus = "CAN1",
+        LiveCaptures = [new LiveCaptureMetadata
+        {
+            DriverId = "pcan-trc-replay", Bitrate = 250000,
+            ReplaySourcePath = "demo.trc", RawCapturePath = "recorded.trc"
+        }],
+        Repeats = [new GuidedExperimentRepeat
+        {
+            RepeatNumber = 1,
+            ReferenceSource = new ExperimentTraceSource { Path = "reference.trc" },
+            ActionSource = new ExperimentTraceSource { Path = "action.trc" }
+        }]
+    };
+    var replayProfile = MachineProfileService.AddCandidate(new MachineProfile(), risingBit,
+        "Replay", SignalKnowledgeState.Candidate, experiment: replayEvidenceExperiment,
+        experimentPath: "demo.canexperiment");
+    Require(replayProfile.Bitrate is null, "Replay setting must not invent a physical bus bitrate.");
+    await GuidedJsonCodec.SaveProfileAsync(profileTemporaryFile, replayProfile with { ProgramVersion = "0.6.0" });
+    var replayRestored = await GuidedJsonCodec.LoadProfileAsync(profileTemporaryFile);
+    var replayEvidence = replayRestored.ExperimentalSignals.Single().Evidence.Single();
+    Require(replayRestored.ProgramVersion == "0.7.0" && replayEvidence.CaptureOrigin == "replay" &&
+            replayEvidence.ExperimentId == replayEvidenceExperiment.ExperimentId &&
+            replayEvidence.ExperimentPath == "demo.canexperiment" &&
+            replayEvidence.Captures.Single().ReplaySourcePath == "demo.trc" &&
+            replayEvidence.Repeats.Single().ActionSource.Path == "action.trc" &&
+            replayEvidence.Description.Contains("REPLAY"),
+        "Replay provenance, sources or writer version did not survive profile round-trip.");
+    var physicalExperiment = replayEvidenceExperiment with
+    {
+        LiveCaptures = [new LiveCaptureMetadata { DriverId = "peak-pcan-basic", Bitrate = 500000 }]
+    };
+    Require(MachineProfileService.AddCandidate(new MachineProfile(), risingBit, "PCAN",
+        SignalKnowledgeState.Candidate, experiment: physicalExperiment).Bitrate == 500000,
+        "Physical capture bitrate was not transferred.");
+    Require(MachineProfileService.AddCandidate(new MachineProfile { Bitrate = 250000 }, risingBit, "PCAN",
+        SignalKnowledgeState.Candidate, experiment: physicalExperiment).Bitrate == 250000,
+        "Conflicting physical bitrate must not overwrite existing profile metadata.");
+
     var upsertConfirmedProfile = MachineProfileService.AddCandidate(
         restoredProfile,
         risingBit,
@@ -789,6 +875,9 @@ finally
     }
 }
 
+await PreFaultTests.RunAsync();
+await ReplayCoverageTests.RunAsync();
+await StreamingScanTests.RunAsync();
 Console.WriteLine("CraneCAN smoke tests passed.");
 return;
 

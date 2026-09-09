@@ -18,7 +18,8 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
     private readonly double _speedFactor;
     private readonly int _defaultChannel;
     private readonly SemaphoreSlim _stepSignal = new(0);
-    private IReadOnlyList<CanFrame>? _frames;
+    private readonly object _sync = new();
+    private CancellationTokenSource? _readCancellation;
     private bool _open;
     private bool _disposed;
     private int _readerActive;
@@ -52,8 +53,8 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        _frames ??= await PcanTrcCodec.LoadAsync(_path, _defaultChannel, cancellationToken)
-            .ConfigureAwait(false);
+        await using var reader = PcanTrcCodec.ReadFramesAsync(_path, _defaultChannel, cancellationToken).GetAsyncEnumerator();
+        await reader.MoveNextAsync().ConfigureAwait(false);
         return [new CanChannelDescriptor("replay-trc", $"Replay: {Path.GetFileName(_path)}")];
     }
 
@@ -72,29 +73,39 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
         }
 
         await DiscoverChannelsAsync(cancellationToken).ConfigureAwait(false);
-        _received = 0;
-        _open = true;
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            if (_open || _readerActive != 0) throw new InvalidOperationException("Предыдущий Replay ещё открыт или завершает чтение.");
+            _readCancellation?.Dispose();
+            _readCancellation = new CancellationTokenSource();
+            while (_stepSignal.Wait(0)) { }
+            _received = 0;
+            _open = true;
+        }
     }
 
     public async IAsyncEnumerable<CanFrame> ReadFramesAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!_open || _frames is null)
+        CancellationTokenSource linked;
+        lock (_sync)
         {
-            throw new InvalidOperationException("Replay-канал не открыт.");
+            ThrowIfDisposed();
+            if (!_open) throw new InvalidOperationException("Replay-канал не открыт.");
+            if (_readerActive != 0) throw new InvalidOperationException("Replay поддерживает только один поток чтения.");
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _readCancellation!.Token);
+            _readerActive = 1;
         }
-
-        if (Interlocked.Exchange(ref _readerActive, 1) != 0)
-        {
-            throw new InvalidOperationException("Replay поддерживает только один поток чтения.");
-        }
+        using var reading = linked;
+        var token = linked.Token;
 
         try
         {
             DateTimeOffset? previous = null;
-            foreach (var frame in _frames)
+            await foreach (var frame in PcanTrcCodec.ReadFramesAsync(_path, _defaultChannel, token).ConfigureAwait(false))
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
                 if (!_open)
                 {
                     yield break;
@@ -102,7 +113,7 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
 
                 if (_mode == ReplayTimingMode.Step)
                 {
-                    await _stepSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    await _stepSignal.WaitAsync(token).ConfigureAwait(false);
                 }
                 else if (previous.HasValue)
                 {
@@ -110,10 +121,11 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
                         0, (frame.Timestamp - previous.Value).Ticks / _speedFactor));
                     if (delay > TimeSpan.Zero)
                     {
-                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(delay, token).ConfigureAwait(false);
                     }
                 }
 
+                token.ThrowIfCancellationRequested();
                 previous = frame.Timestamp;
                 Interlocked.Increment(ref _received);
                 yield return frame;
@@ -121,7 +133,11 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
         }
         finally
         {
-            Interlocked.Exchange(ref _readerActive, 0);
+            lock (_sync)
+            {
+                _readerActive = 0;
+                if (_disposed) { _readCancellation?.Dispose(); _stepSignal.Dispose(); }
+            }
         }
     }
 
@@ -139,7 +155,7 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
     public Task CloseAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        _open = false;
+        lock (_sync) { _open = false; _readCancellation?.Cancel(); }
         return Task.CompletedTask;
     }
 
@@ -155,8 +171,12 @@ public sealed class ReplayCanDriver : ICanDriver, ICanDriverDiagnostics
         }
 
         await CloseAsync().ConfigureAwait(false);
-        _stepSignal.Dispose();
-        _disposed = true;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            if (_readerActive == 0) { _readCancellation?.Dispose(); _stepSignal.Dispose(); }
+        }
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);

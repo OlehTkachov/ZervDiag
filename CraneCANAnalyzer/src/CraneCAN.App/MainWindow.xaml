@@ -146,7 +146,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock x:Name="LiveStateText" Text="IDLE" FontSize="20" FontWeight="Bold"
+                                <TextBlock x:Name="LiveStateText" Text="ОЖИДАНИЕ" FontSize="20" FontWeight="Bold"
                                            Foreground="#425466" />
                                 <TextBlock x:Name="LiveInstructionText" Text="Подключите PCAN или выберите Replay TRC."
                                            FontSize="26" FontWeight="Bold" TextWrapping="Wrap" Margin="0,7,0,4" />
@@ -156,6 +156,8 @@
                                            FontSize="14" Foreground="#586574" />
                                 <TextBlock x:Name="LiveQualityText" Text="Эксперимент не запущен."
                                            Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#586574" />
+                                <TextBlock x:Name="LiveReplayNotice" TextWrapping="Wrap" Margin="0,6,0,0"
+                                           Foreground="#795400" FontSize="12" Visibility="Collapsed" />
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="18,0,0,0" MinWidth="280">
                                 <WrapPanel HorizontalAlignment="Center">
@@ -170,14 +172,20 @@
                                     <TextBlock Text="POST" VerticalAlignment="Center" Margin="8,4,4,4" />
                                     <TextBox x:Name="LivePostSecondsTextBox" Width="42" Text="5" Margin="2" />
                                 </WrapPanel>
-                                <Button x:Name="LiveStartButton" Content="START GUIDED EXPERIMENT"
+                                <Button x:Name="LiveStartButton" Content="НАЧАТЬ ОПЫТ"
                                         Click="LiveStartButton_Click" Padding="18,10" FontSize="15"
                                         FontWeight="Bold" IsEnabled="False" />
-                                <Button x:Name="LiveAbortButton" Content="ABORT / STOP"
+                                <Button x:Name="LiveAbortButton" Content="ОСТАНОВИТЬ ОПЫТ"
                                         Click="LiveAbortButton_Click" Padding="18,9" FontSize="15"
                                         Background="#B33A3A" Foreground="White" FontWeight="Bold" IsEnabled="False" />
                                 <Button x:Name="LiveSaveButton" Content="Сохранить сеанс…"
                                         Click="LiveSaveButton_Click" IsEnabled="False" />
+                                <Button x:Name="IncidentMarkButton" Content="ОТМЕТИТЬ СОБЫТИЕ (−10 / +5 с)"
+                                        Click="IncidentMarkButton_Click" IsEnabled="False" />
+                                <Button x:Name="IncidentSaveButton" Content="Сохранить запись события…"
+                                        Click="IncidentSaveButton_Click" IsEnabled="False" />
+                                <TextBlock x:Name="IncidentStatusText" Text="Предыстория: ожидание потока"
+                                           TextWrapping="Wrap" MaxWidth="300" Margin="4" />
                             </StackPanel>
                         </Grid>
                     </Border>

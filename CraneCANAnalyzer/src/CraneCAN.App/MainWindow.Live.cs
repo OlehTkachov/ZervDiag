@@ -25,6 +25,9 @@ public partial class MainWindow
     private LiveExperimentSession? _liveSession;
     private GuidedAnalysisResult? _liveAnalysis;
     private string? _liveReplayPath;
+    private bool _liveStarting;
+    private CancellationTokenSource? _livePreparation;
+    private ReplayCoverage? _liveReplayCoverage;
     private string? _liveActionGroup;
     private long _liveLastFrameUtcTicks;
     private long _liveStandardFrames;
@@ -140,7 +143,7 @@ public partial class MainWindow
                     throw new InvalidOperationException("Не выбран исходный TRC для Replay.");
                 _liveConnectionReady = true;
                 LiveConnectionText.Text = "REPLAY READY";
-                LiveInstructionText.Text = "Replay подключён. Нажмите START GUIDED EXPERIMENT.";
+                LiveInstructionText.Text = "Replay подключён. Нажмите «НАЧАТЬ ОПЫТ».";
             }
             else
             {
@@ -178,6 +181,9 @@ public partial class MainWindow
 
     private async void LiveStartButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_liveStarting) return;
+        _liveStarting = true;
+        UpdateLiveControls();
         try
         {
             if (!_liveConnectionReady) throw new InvalidOperationException("Live CAN не подключён.");
@@ -185,6 +191,40 @@ public partial class MainWindow
                 throw new InvalidOperationException("Предыдущий Live-эксперимент ещё не завершён.");
 
             var configuration = CreateLiveConfiguration();
+            ReplayCoverage? replayCoverage = null;
+            if (IsReplaySource)
+            {
+                if (string.IsNullOrWhiteSpace(_liveReplayPath))
+                    throw new InvalidOperationException("Не выбран TRC для Replay.");
+                using var preparation = new CancellationTokenSource();
+                _livePreparation = preparation;
+                UpdateLiveControls();
+                var progress = new Progress<PcanTrcScanProgress>(value =>
+                {
+                    if (ReferenceEquals(_livePreparation, preparation) && !_liveClosing)
+                        StatusText.Text = $"Проверка TRC: {value.Percent:0}% · кадров {value.FrameCount:N0}. «ОТМЕНИТЬ ПОДГОТОВКУ» — отмена.";
+                });
+                PcanTrcScanResult scan;
+                try
+                {
+                    var path = _liveReplayPath;
+                    scan = await Task.Run(() => PcanTrcCodec.ScanAsync(path, progress, preparation.Token));
+                    preparation.Token.ThrowIfCancellationRequested();
+                }
+                finally { _livePreparation = null; UpdateLiveControls(); }
+                if (_liveClosing) return;
+                replayCoverage = new ReplayCoverage(scan.FirstTimestamp,
+                    scan.FirstTimestamp.HasValue ? scan.LastTimestamp!.Value - scan.FirstTimestamp.Value : TimeSpan.Zero,
+                    configuration.BaselineDuration + configuration.ActionLeadInDuration + configuration.ActionDuration + configuration.PostActionDuration,
+                    scan.Ordered, scan.ReceiveFrameCount > 0);
+                StatusText.Text = $"TRC проверен: {scan.FrameCount:N0} кадров.";
+                if (!replayCoverage.CanComplete)
+                    throw new InvalidOperationException(!replayCoverage.Ordered
+                        ? "В TRC нарушен порядок времени кадров. Выберите корректную запись."
+                        : !replayCoverage.HasReceiveFrames
+                            ? "В TRC нет принимаемых кадров Classical CAN."
+                            : $"TRC содержит {replayCoverage.Available.TotalSeconds:0.###} с; для опыта нужно {replayCoverage.Required.TotalSeconds:0.###} с (REFERENCE + ожидание + ACTION + POST). Уменьшите длительность этапов или выберите более длинную запись. Опыт не запущен.");
+            }
             if (_liveRuns.Count > 0 && !string.Equals(_liveActionGroup, configuration.ActionName, StringComparison.Ordinal))
             {
                 var answer = MessageBox.Show(
@@ -201,10 +241,10 @@ public partial class MainWindow
                 if (string.IsNullOrWhiteSpace(_liveReplayPath))
                     throw new InvalidOperationException("Не выбран TRC для Replay.");
                 await DisposeLiveTransportAsync(invalidateActiveExperiment: false);
-                _liveDriver = new ReplayCanDriver(_liveReplayPath, ReplayTimingMode.Accelerated, 20);
+                _liveDriver = new ReplayCanDriver(_liveReplayPath, ReplayTimingMode.RealTime);
                 _liveReceiver = CreateLiveReceiver(_liveDriver);
-                var frames = await PcanTrcCodec.LoadAsync(_liveReplayPath);
-                start = frames[0].Timestamp;
+                start = replayCoverage!.Start!.Value;
+                _liveReplayCoverage = replayCoverage;
             }
             else
             {
@@ -233,26 +273,31 @@ public partial class MainWindow
             }
 
             LiveCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
-            LiveQualityText.Text = "REFERENCE записывается. Ничего не трогайте.";
+            LiveQualityText.Text = LiveUiText.Get("BaselineHint");
             LiveStartButton.IsEnabled = false;
             LiveAbortButton.IsEnabled = true;
             UpdateLiveDisplay();
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_liveClosing) StatusText.Text = "Подготовка Replay отменена. Новый опыт не запущен.";
         }
         catch (Exception exception)
         {
             MessageBox.Show(FormatException(exception), "Запуск Live-эксперимента",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
-        finally { UpdateLiveControls(); }
+        finally { _liveStarting = false; UpdateLiveControls(); }
     }
 
     private void LiveAbortButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_livePreparation is not null) { _livePreparation.Cancel(); return; }
         if (_liveSession is null) return;
         _liveSession.Abort(DateTimeOffset.UtcNow);
         _liveReceiver?.AttachSession(null);
         RecordAbortedLiveMetadata(_liveSession);
-        LiveQualityText.Text = "ABORTED: опыт остановлен оператором; кандидаты не сформированы.";
+        LiveQualityText.Text = "Опыт остановлен оператором; кандидаты не сформированы.";
         LiveInstructionText.Text = "Эксперимент остановлен. Верните органы управления в безопасное положение.";
         UpdateLiveControls();
     }
@@ -281,7 +326,7 @@ public partial class MainWindow
 
     private void LiveUiTimer_Tick(object? sender, EventArgs e)
     {
-        if (_liveSession is not null && _liveSession.State is not
+        if (!IsReplaySource && _liveSession is not null && _liveSession.State is not
             (LiveExperimentState.Idle or LiveExperimentState.Completed or LiveExperimentState.Aborted or LiveExperimentState.Analyzing))
         {
             var timestamp = IsReplaySource && Interlocked.Read(ref _liveLastFrameUtcTicks) > 0
@@ -291,6 +336,7 @@ public partial class MainWindow
             catch (ArgumentOutOfRangeException) { }
         }
         UpdateLiveDisplay();
+        UpdateIncidentDisplay();
         if (_liveSession?.State == LiveExperimentState.Analyzing && !_liveCompleting)
             _ = CompleteLiveExperimentAsync();
     }
@@ -304,11 +350,19 @@ public partial class MainWindow
             if (frame.IsExtended) Interlocked.Increment(ref _liveExtendedFrames);
             else Interlocked.Increment(ref _liveStandardFrames);
         };
+        receiver.ReplayEnded += () => Dispatcher.BeginInvoke(() =>
+        {
+            if (!ReferenceEquals(receiver, _liveReceiver)) return;
+            LiveConnectionText.Text = "REPLAY READY";
+            StatusText.Text = "Достигнут конец TRC. Replay можно запустить снова.";
+            UpdateIncidentDisplay();
+            UpdateLiveControls();
+        });
         receiver.ReceiverFaulted += message => Dispatcher.BeginInvoke(() =>
         {
             _liveConnectionReady = false;
             LiveConnectionText.Text = "CONNECTION LOST";
-            LiveQualityText.Text = "INVALID: " + message;
+            LiveQualityText.Text = "Недействителен: " + message;
             LiveInstructionText.Text = "STOP. Проверьте PCAN и CAN-шину; результат этого опыта недействителен.";
             UpdateLiveControls();
         });
@@ -349,6 +403,7 @@ public partial class MainWindow
                 SessionId = result.SessionId,
                 RepeatNumber = result.Configuration.RepeatNumber,
                 DriverId = _liveDriver?.Id ?? string.Empty,
+                ReplaySourcePath = IsReplaySource ? _liveReplayPath : null,
                 ChannelId = (LiveChannelCombo.SelectedItem as CanChannelDescriptor)?.Id ?? string.Empty,
                 Bitrate = LiveBitrateCombo.SelectedItem is int bitrate ? bitrate : 250_000,
                 ListenOnlyConfirmed = driverStatus.ListenOnlyConfirmed,
@@ -383,14 +438,14 @@ public partial class MainWindow
                     GuidedDiagnosticsAnalyzer.Analyze(result.Configuration.ActionName, _liveRuns));
                 LiveCandidatesGrid.ItemsSource = _liveAnalysis.Candidates
                     .Select((candidate, index) => new GuidedCandidateRow(index + 1, candidate)).ToArray();
-                LiveQualityText.Text = $"VALID · повторов {_liveRuns.Count} · кандидатов {_liveAnalysis.Candidates.Count}. " +
+                LiveQualityText.Text = $"Пригоден для анализа · повторов {_liveRuns.Count} · кандидатов {_liveAnalysis.Candidates.Count}. " +
                                        FormatQuality(_liveAnalysis.Quality);
                 LiveInstructionText.Text = "ГОТОВО. Результат — проверяемые кандидаты, а не подтверждённые функции ECU.";
             }
             else
             {
                 LiveCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
-                LiveQualityText.Text = $"{result.Outcome.ToString().ToUpperInvariant()}: неполные данные; кандидаты подавлены.";
+                LiveQualityText.Text = "Опыт непригоден: неполные данные; кандидаты не показаны.";
                 LiveInstructionText.Text = "Опыт недействителен. Устраните причину и повторите.";
             }
 
@@ -401,7 +456,7 @@ public partial class MainWindow
         }
         catch (Exception exception)
         {
-            LiveQualityText.Text = "INVALID: анализ не завершён.";
+            LiveQualityText.Text = "Недействителен: анализ не завершён.";
             MessageBox.Show(FormatException(exception), "Live Guided Analysis",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -504,7 +559,10 @@ public partial class MainWindow
     private void UpdateLiveDisplay()
     {
         var state = _liveSession?.State ?? LiveExperimentState.Idle;
-        LiveStateText.Text = state.ToString().ToUpperInvariant();
+        LiveStateText.Text = LiveUiText.Stage(state);
+        LiveStartButton.Content = LiveUiText.Get("Start");
+        LiveReplayNotice.Text = LiveUiText.Get("ReplayNotice");
+        LiveReplayNotice.Visibility = IsReplaySource ? Visibility.Visible : Visibility.Collapsed;
         LiveInstructionText.Text = state switch
         {
             LiveExperimentState.Baseline => "НЕ ТРОГАЙТЕ ОРГАНЫ УПРАВЛЕНИЯ. Записываю REFERENCE.",
@@ -512,18 +570,37 @@ public partial class MainWindow
             LiveExperimentState.Action => _liveSession!.Configuration.OperatorInstruction,
             LiveExperimentState.PostAction => "STOP. Верните орган управления в нейтраль и ничего не трогайте.",
             LiveExperimentState.Analyzing => "АНАЛИЗ…",
-            LiveExperimentState.Aborted => "ABORTED. Результат опыта недействителен.",
+            LiveExperimentState.Aborted => "ОПЫТ ПРЕРВАН. Результат недействителен.",
             _ when !_liveConnectionReady => "Подключите PCAN или выберите Replay TRC.",
             _ => LiveInstructionText.Text
         };
 
+        if (IsReplaySource && state is LiveExperimentState.Baseline or LiveExperimentState.WaitingForAction or
+            LiveExperimentState.Action or LiveExperimentState.PostAction)
+            LiveInstructionText.Text = LiveUiText.Get("Replay" + state);
+
+        // Only refresh active-stage hints; preserve analysis results and fault details.
+        LiveQualityText.Text = state switch
+        {
+            LiveExperimentState.Baseline => LiveUiText.Get("BaselineHint"),
+            LiveExperimentState.WaitingForAction => LiveUiText.Get("WaitingHint"),
+            LiveExperimentState.Action => LiveUiText.Get("ActionHint"),
+            LiveExperimentState.PostAction => LiveUiText.Get("PostHint"),
+            LiveExperimentState.Analyzing => "Запись этапов завершена. Проверяю качество и кандидатов…",
+            _ => LiveQualityText.Text
+        };
+
+        if (IsReplaySource && state is LiveExperimentState.Baseline or LiveExperimentState.WaitingForAction or
+            LiveExperimentState.Action or LiveExperimentState.PostAction)
+            LiveQualityText.Text = "Сравнение временных участков готовой записи.";
+
         var remaining = GetLiveStageRemaining(state);
         LiveCountdownText.Text = remaining.HasValue ? $"{Math.Max(0, remaining.Value.TotalSeconds):00.0} s" : "—";
         var status = _liveReceiver?.DriverStatus;
-        LiveCountersText.Text = $"Frames: {status?.ReceivedFrames ?? 0:N0}    " +
-                                $"Standard: {Interlocked.Read(ref _liveStandardFrames):N0}    " +
-                                $"Extended: {Interlocked.Read(ref _liveExtendedFrames):N0}    " +
-                                $"Lost: {status?.LostFrames ?? 0:N0}    Errors: {status?.ErrorFrames ?? 0:N0}";
+        LiveCountersText.Text = $"Кадров: {status?.ReceivedFrames ?? 0:N0}    " +
+                                $"Стандартных: {Interlocked.Read(ref _liveStandardFrames):N0}    " +
+                                $"Расширенных: {Interlocked.Read(ref _liveExtendedFrames):N0}    " +
+                                $"Потерь: {status?.LostFrames ?? 0:N0}    Ошибок: {status?.ErrorFrames ?? 0:N0}";
         LiveListenOnlyText.Text = status is { ListenOnlyConfirmed: false } && !IsReplaySource
             ? "LISTEN ONLY NOT CONFIRMED"
             : "LISTEN ONLY";
@@ -559,6 +636,8 @@ public partial class MainWindow
 
     private async Task DisposeLiveTransportAsync(bool invalidateActiveExperiment)
     {
+        _liveReceiver?.Incidents.Stop();
+        RetainIncident();
         var receiver = _liveReceiver;
         var driver = _liveDriver;
         _liveReceiver = null;
@@ -621,8 +700,10 @@ public partial class MainWindow
         if (LiveStartButton is null) return;
         var active = _liveSession?.State is LiveExperimentState.Baseline or LiveExperimentState.WaitingForAction or
             LiveExperimentState.Action or LiveExperimentState.PostAction or LiveExperimentState.Analyzing;
-        LiveStartButton.IsEnabled = _liveConnectionReady && !active && !_liveCompleting;
-        LiveAbortButton.IsEnabled = active && _liveSession?.State != LiveExperimentState.Analyzing;
+        LiveStartButton.IsEnabled = _liveConnectionReady && !active && !_liveCompleting && !_liveStarting;
+        LiveAbortButton.Content = LiveUiText.Get(_livePreparation is not null ? "Cancel" : "Stop");
+        LiveAbortButton.IsEnabled = _livePreparation is not null || (active && _liveSession?.State != LiveExperimentState.Analyzing);
+        LiveConnectButton.IsEnabled = !_liveStarting;
         LiveConnectButton.Content = _liveConnectionReady ? "ОТКЛЮЧИТЬ" : "ПОДКЛЮЧИТЬ";
         LiveSourceCombo.IsEnabled = !_liveConnectionReady && !active;
         LiveReplayFileButton.IsEnabled = IsReplaySource && !_liveConnectionReady && !active;
@@ -653,7 +734,7 @@ public partial class MainWindow
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "CraneCAN", "LiveCaptures");
         Directory.CreateDirectory(root);
-        return Path.Combine(root, $"CraneCAN_{source}_{timestamp:yyyyMMdd_HHmmss_fff}.trc");
+        return Path.Combine(root, LiveTrcWriter.CreateCaptureFileName(source, timestamp));
     }
 
     private async void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -661,6 +742,7 @@ public partial class MainWindow
         if (_liveClosing) return;
         e.Cancel = true;
         _liveClosing = true;
+        _livePreparation?.Cancel();
         _liveUiTimer.Stop();
         try
         {

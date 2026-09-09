@@ -65,5 +65,5 @@ public sealed record MachineProfile
     public string Notes { get; init; } = string.Empty;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
-    public string ProgramVersion { get; init; } = "0.6.0";
+    public string ProgramVersion { get; init; } = "0.7.0";
 }

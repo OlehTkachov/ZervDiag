@@ -30,6 +30,12 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>README.md</TargetPath>
     </Content>
+    <Content Include="..\..\docs\PRE_FAULT_RECORDER.md">
+      <Link>docs\PRE_FAULT_RECORDER.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\PRE_FAULT_RECORDER.md</TargetPath>
+    </Content>
     <Content Include="..\..\docs\SOOSAN_FIELD_CAPTURE.md">
       <Link>docs\SOOSAN_FIELD_CAPTURE.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

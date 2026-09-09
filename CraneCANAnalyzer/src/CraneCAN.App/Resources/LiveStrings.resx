@@ -1,0 +1,75 @@
+<?xml version='1.0' encoding='utf-8'?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="StageIdle" xml:space="preserve">
+    <value>ОЖИДАНИЕ</value>
+  </data>
+  <data name="StageBaseline" xml:space="preserve">
+    <value>ИСХОДНОЕ СОСТОЯНИЕ</value>
+  </data>
+  <data name="StageWaitingForAction" xml:space="preserve">
+    <value>ПОДГОТОВКА К ДЕЙСТВИЮ</value>
+  </data>
+  <data name="StageAction" xml:space="preserve">
+    <value>ДЕЙСТВИЕ</value>
+  </data>
+  <data name="StagePostAction" xml:space="preserve">
+    <value>ПОСЛЕ ДЕЙСТВИЯ</value>
+  </data>
+  <data name="StageAnalyzing" xml:space="preserve">
+    <value>АНАЛИЗ</value>
+  </data>
+  <data name="StageCompleted" xml:space="preserve">
+    <value>ЗАВЕРШЕНО</value>
+  </data>
+  <data name="StageAborted" xml:space="preserve">
+    <value>ОПЫТ ПРЕРВАН</value>
+  </data>
+  <data name="ReplayNotice" xml:space="preserve">
+    <value>Воспроизводится готовый TRC. Название действия задано пользователем; сопоставьте выбранный интервал с реальным действием в исходной записи. Повторное воспроизведение этого файла не является независимым физическим опытом.</value>
+  </data>
+  <data name="ReplayBaseline" xml:space="preserve">
+    <value>Читаю исходный участок записи. Выполнять действия на машине не нужно.</value>
+  </data>
+  <data name="ReplayWaitingForAction" xml:space="preserve">
+    <value>Ожидаю начала выбранного участка действия в записи.</value>
+  </data>
+  <data name="ReplayAction" xml:space="preserve">
+    <value>Читаю выбранный участок действия из TRC.</value>
+  </data>
+  <data name="ReplayPostAction" xml:space="preserve">
+    <value>Читаю участок после действия из TRC.</value>
+  </data>
+  <data name="Start" xml:space="preserve">
+    <value>НАЧАТЬ ОПЫТ</value>
+  </data>
+  <data name="Stop" xml:space="preserve">
+    <value>ОСТАНОВИТЬ ОПЫТ</value>
+  </data>
+  <data name="Cancel" xml:space="preserve">
+    <value>ОТМЕНИТЬ ПОДГОТОВКУ</value>
+  </data>
+  <data name="BaselineHint" xml:space="preserve">
+    <value>Записываю исходное состояние. Ничего не трогайте.</value>
+  </data>
+  <data name="WaitingHint" xml:space="preserve">
+    <value>Исходное состояние записано. Приготовьтесь к действию.</value>
+  </data>
+  <data name="ActionHint" xml:space="preserve">
+    <value>Действие записывается. Выполняйте выбранное действие.</value>
+  </data>
+  <data name="PostHint" xml:space="preserve">
+    <value>Записываю состояние после действия. Органы управления должны быть в нейтрали.</value>
+  </data>
+</root>

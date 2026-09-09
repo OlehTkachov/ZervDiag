@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private GuidedAnalysisResult? _guidedAnalysisResult;
     private MachineProfile _machineProfile = new();
     private string? _machineProfilePath;
+    private GuidedExperiment _guidedDocument = new();
+    private string? _guidedDocumentPath;
 
     public MainWindow()
     {
@@ -212,6 +214,8 @@ public partial class MainWindow : Window
         _referenceFrameCount = 0;
         _actionFrameCount = 0;
         _guidedRuns.Clear();
+        _guidedDocument = new GuidedExperiment();
+        _guidedDocumentPath = null;
         _guidedRepeatDefinitions.Clear();
         _guidedCandidates = [];
         _guidedAnalysisResult = null;
@@ -634,7 +638,8 @@ public partial class MainWindow : Window
             row.Candidate,
             GuidedActionNameTextBox.Text.Trim(),
             status,
-            $"Добавлено пользователем из кандидата №{row.Rank}");
+            $"Добавлено пользователем из кандидата №{row.Rank}",
+            CreateExperimentDocument(), _guidedDocumentPath);
         StatusText.Text = $"Сигнал добавлен в профиль как {status}. Сохраните профиль на диск.";
     }
 
@@ -661,6 +666,8 @@ public partial class MainWindow : Window
         {
             var experiment = CreateExperimentDocument();
             await GuidedJsonCodec.SaveExperimentAsync(dialog.FileName, experiment);
+            _guidedDocument = experiment;
+            _guidedDocumentPath = dialog.FileName;
             StatusText.Text = $"Эксперимент сохранён: {dialog.FileName}";
         }
         catch (Exception exception)
@@ -726,6 +733,11 @@ public partial class MainWindow : Window
             }
 
             _guidedRuns.Clear();
+            _guidedDocument = experiment;
+            _guidedDocumentPath = dialog.FileName;
+            _guidedCandidates = [];
+            _guidedAnalysisResult = null;
+            GuidedCandidatesGrid.ItemsSource = Array.Empty<GuidedCandidateRow>();
             _guidedRuns.AddRange(loadedRuns);
             _guidedRepeatDefinitions.Clear();
             _guidedRepeatDefinitions.AddRange(experiment.Repeats);
@@ -746,7 +758,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private GuidedExperiment CreateExperimentDocument() => new()
+    private GuidedExperiment CreateExperimentDocument() => _guidedDocument with
     {
         MachineProfileId = _machineProfile.ProfileId,
         Name = GuidedActionNameTextBox.Text.Trim(),

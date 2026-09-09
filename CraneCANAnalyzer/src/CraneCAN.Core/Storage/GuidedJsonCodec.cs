@@ -19,7 +19,7 @@ public static class GuidedJsonCodec
         string path,
         MachineProfile profile,
         CancellationToken cancellationToken = default) =>
-        SaveAsync(path, profile, cancellationToken);
+        SaveAsync(path, profile with { ProgramVersion = "0.7.0", UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken);
 
     public static Task<MachineProfile> LoadProfileAsync(
         string path,

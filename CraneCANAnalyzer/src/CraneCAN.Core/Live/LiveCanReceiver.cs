@@ -24,7 +24,9 @@ public sealed class LiveCanReceiver : IAsyncDisposable
 
     public event Action<CanFrame>? FrameReceived;
     public event Action<string>? ReceiverFaulted;
+    public event Action? ReplayEnded;
     public LiveCanBuffer Buffer { get; }
+    public PreFaultRecorder Incidents { get; } = new();
     public bool IsReceiving { get; private set; }
     public string? RawCapturePath { get; private set; }
     public DateTimeOffset? RawCaptureStart { get; private set; }
@@ -99,27 +101,52 @@ public sealed class LiveCanReceiver : IAsyncDisposable
 
     private async Task ReadLoopAsync(CancellationToken cancellationToken)
     {
+        DateTimeOffset? lastTimestamp = null;
         try
         {
             await foreach (var frame in _driver.ReadFramesAsync(cancellationToken).ConfigureAwait(false))
             {
+                lastTimestamp = frame.Timestamp;
                 Buffer.Append(frame);
+                var status = DriverStatus;
+                if (status.LostFrames > 0 || status.ErrorFrames > 0 || !status.ListenOnlyConfirmed)
+                    Incidents.MarkCaptureUncertain();
+                Incidents.Append(frame);
                 LiveExperimentSession? session; LiveTrcWriter? writer;
                 lock (_sync) { session = _session; writer = _writer; }
                 session?.AppendFrame(frame);
                 if (writer is not null) await writer.AppendAsync(frame, cancellationToken).ConfigureAwait(false);
                 try { FrameReceived?.Invoke(frame); } catch { }
             }
-            if (!cancellationToken.IsCancellationRequested && !ExperimentReachedAnalysis())
-                HandleUnexpectedStop("Поток CAN завершился без команды Stop.", null);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                if (_driver is ReplayCanDriver)
+                {
+                    Incidents.Stop(replayEnded: true);
+                    LiveExperimentSession? session; lock (_sync) session = _session;
+                    if (session is not null && session.State is not
+                        (LiveExperimentState.Idle or LiveExperimentState.Completed or LiveExperimentState.Aborted or LiveExperimentState.Analyzing))
+                        session.Invalidate(LiveSessionWarningCode.ReplayExhausted,
+                            "TRC закончился до завершения опыта. Уменьшите длительность этапов или выберите более длинную запись.",
+                            lastTimestamp ?? RawCaptureStart ?? DateTimeOffset.UtcNow);
+                    try { ReplayEnded?.Invoke(); } catch { }
+                }
+                else if (!ExperimentReachedAnalysis())
+                    HandleUnexpectedStop("Поток CAN завершился без команды Stop.", null);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception ex) { if (!_stopping) HandleUnexpectedStop("Соединение с CAN-адаптером потеряно.", ex); }
-        finally { IsReceiving = false; }
+        finally
+        {
+            Incidents.Stop();
+            IsReceiving = false;
+        }
     }
 
     private void HandleUnexpectedStop(string message, Exception? exception)
     {
+        Incidents.MarkCaptureUncertain();
         var detail = exception is null ? message : $"{message} {exception.Message}";
         LiveExperimentSession? session; lock (_sync) { LastError = detail; session = _session; }
         if (session is not null && session.State is not

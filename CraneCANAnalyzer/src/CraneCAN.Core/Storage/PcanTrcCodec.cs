@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using CraneCAN.Core.Models;
 
 namespace CraneCAN.Core.Storage;
@@ -66,6 +67,71 @@ public static class PcanTrcCodec
         return parser.Complete();
     }
 
+    /// <summary>Yields frames in file order with bounded buffering and no frame-count limit.</summary>
+    public static async IAsyncEnumerable<CanFrame> ReadFramesAsync(string path, int defaultChannel = 0,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ValidateArguments(defaultChannel, DefaultMaximumFrameCount);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+        CanFrame? current = null;
+        var parser = new ParserState(defaultChannel, DefaultMaximumFrameCount, frame => current = frame);
+        var any = false;
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            current = null;
+            parser.Process(line);
+            if (current is not null)
+            {
+                any = true;
+                yield return current;
+            }
+        }
+        if (!any) throw new FormatException("TRC-файл не содержит обычных кадров Classical CAN с данными.");
+    }
+
+    /// <summary>Inspects the entire trace using the import parser without retaining frames.</summary>
+    public static async Task<PcanTrcScanResult> ScanAsync(string path,
+        IProgress<PcanTrcScanProgress>? progress = null, CancellationToken cancellationToken = default,
+        int defaultChannel = 0)
+    {
+        ValidateArguments(defaultChannel, DefaultMaximumFrameCount);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+        DateTimeOffset? first = null, last = null;
+        long count = 0, received = 0;
+        var ordered = true;
+        var parser = new ParserState(defaultChannel, DefaultMaximumFrameCount, frame =>
+        {
+            first ??= frame.Timestamp;
+            if (last.HasValue && frame.Timestamp < last.Value) ordered = false;
+            last = frame.Timestamp;
+            count++;
+            if (frame.Direction == CanDirection.Rx) received++;
+        });
+        progress?.Report(new(0, 0));
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            parser.Process(line);
+            if (parser.TotalLines % 4096 == 0)
+                progress?.Report(new(stream.Length == 0 ? 0 : Math.Min(99, 100.0 * stream.Position / stream.Length), count));
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new(100, count));
+        return new(first, last, count, received, ordered, parser.TotalLines,
+            parser.RemoteFramesSkipped, parser.ErrorFramesSkipped, parser.UnknownOrMalformedLines);
+    }
+
     public static IReadOnlyList<CanFrame> Parse(
         IEnumerable<string> lines,
         int defaultChannel = 0,
@@ -106,15 +172,17 @@ public static class PcanTrcCodec
         private readonly int _defaultChannel;
         private readonly int _maximumFrameCount;
         private readonly List<CanFrame> _frames = [];
+        private readonly Action<CanFrame>? _onFrame;
         private Version _fileVersion = Version10;
         private string[]? _columns;
         private DateTimeOffset _start = DateTimeOffset.UnixEpoch;
         private bool _haveStart;
 
-        public ParserState(int defaultChannel, int maximumFrameCount)
+        public ParserState(int defaultChannel, int maximumFrameCount, Action<CanFrame>? onFrame = null)
         {
             _defaultChannel = defaultChannel;
             _maximumFrameCount = maximumFrameCount;
+            _onFrame = onFrame;
         }
 
         public int TotalLines { get; private set; }
@@ -143,6 +211,15 @@ public static class PcanTrcCodec
                 }
 
                 _fileVersion = parsedVersion;
+                HeaderAndCommentLines++;
+                return;
+            }
+
+            if (TryReadKeyword(line, "$CRANECAN_STARTUTC", out var absoluteStart))
+            {
+                if (!DateTimeOffset.TryParse(absoluteStart, CultureInfo.InvariantCulture, DateTimeStyles.None, out _start))
+                    throw new FormatException("Некорректный абсолютный timestamp CraneCAN.");
+                _haveStart = true;
                 HeaderAndCommentLines++;
                 return;
             }
@@ -209,6 +286,12 @@ public static class PcanTrcCodec
             catch (ArgumentException)
             {
                 UnknownOrMalformedLines++;
+                return;
+            }
+
+            if (_onFrame is not null)
+            {
+                _onFrame(frame);
                 return;
             }
 

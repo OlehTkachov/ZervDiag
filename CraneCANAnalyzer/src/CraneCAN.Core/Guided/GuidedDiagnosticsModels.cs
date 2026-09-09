@@ -31,6 +31,11 @@ public enum EvidenceKind
 
 public sealed record SignalEvidence
 {
+    public Guid? ExperimentId { get; init; }
+    public string? ExperimentPath { get; init; }
+    public string CaptureOrigin { get; init; } = "unknown";
+    public List<GuidedExperimentRepeat> Repeats { get; init; } = [];
+    public List<LiveCaptureMetadata> Captures { get; init; } = [];
     public EvidenceKind Kind { get; init; }
     public string Description { get; init; } = string.Empty;
     public string? SourceReference { get; init; }
@@ -75,6 +80,7 @@ public sealed record GuidedExperiment
 
 public sealed record LiveCaptureMetadata
 {
+    public string? ReplaySourcePath { get; init; }
     public Guid SessionId { get; init; }
     public int RepeatNumber { get; init; }
     public string DriverId { get; init; } = string.Empty;
