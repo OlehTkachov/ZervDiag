@@ -879,6 +879,7 @@ await PreFaultTests.RunAsync();
 await ReplayCoverageTests.RunAsync();
 await StreamingScanTests.RunAsync();
 FirstDivergenceTests.Run();
+await ConfigurationSnapshotTests.RunAsync();
 Console.WriteLine("CraneCAN smoke tests passed.");
 return;
 
