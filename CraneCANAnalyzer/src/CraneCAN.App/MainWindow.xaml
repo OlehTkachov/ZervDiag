@@ -184,6 +184,8 @@
                                         Click="IncidentMarkButton_Click" IsEnabled="False" />
                                 <Button x:Name="IncidentSaveButton" Content="Сохранить запись события…"
                                         Click="IncidentSaveButton_Click" IsEnabled="False" />
+                                <Button Content="Открыть .canincident…"
+                                        Click="IncidentOpenButton_Click" />
                                 <TextBlock x:Name="IncidentStatusText" Text="Предыстория: ожидание потока"
                                            TextWrapping="Wrap" MaxWidth="300" Margin="4" />
                             </StackPanel>

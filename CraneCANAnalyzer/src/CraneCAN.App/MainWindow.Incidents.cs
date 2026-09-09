@@ -1,6 +1,7 @@
 using System.IO;
 using System.Threading;
 using System.Windows;
+using System.Windows.Controls;
 using CraneCAN.Core.Live;
 using CraneCAN.Core.Storage;
 using Microsoft.Win32;
@@ -103,9 +104,207 @@ public partial class MainWindow
             IncidentSaveButton.IsEnabled = false;
             var path = await PreFaultIncidentCodec.SaveAsync(dialog.FolderName, incident, source);
             _savedIncidentId = incident.IncidentId;
-            StatusText.Text = $"Событие сохранено: {path}. Для просмотра откройте capture.trc из этой папки.";
+            StatusText.Text = $"Событие сохранено: {path}. Его можно открыть кнопкой «Открыть .canincident…».";
         }
         catch (Exception exception) { MessageBox.Show(FormatException(exception), "Сохранение события"); }
         finally { UpdateIncidentDisplay(); }
     }
+
+    private async void IncidentOpenButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Открыть сохранённое событие CraneCAN",
+            Filter = "CraneCAN incident (*.canincident)|*.canincident|Все файлы (*.*)|*.*"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        LoadedIncidentPackage? package = null;
+        SetBusy(true, "Проверка .canincident и связанного capture.trc…");
+        try
+        {
+            package = await PreFaultIncidentCodec.LoadAsync(dialog.FileName);
+            StatusText.Text = $"Открыто событие {package.Incident.IncidentId:N}: {package.Incident.Frames.Count:N0} кадров.";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Открытие события",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = "Сохранённое событие не открыто.";
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+
+        if (package is not null) ShowIncidentTimeline(package);
+    }
+
+    private void ShowIncidentTimeline(LoadedIncidentPackage package)
+    {
+        var incident = package.Incident;
+        var quality = IncidentQualityText(incident);
+        var summary = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 10),
+            Text =
+                $"Incident: {incident.IncidentId:N}\n" +
+                $"{(incident.Complete ? "Запись полная" : "Запись неполная / качество ограничено")} · " +
+                $"{incident.Frames.Count:N0} кадров · источник: {package.Source.DriverId} / {package.Source.ChannelId}\n" +
+                $"Качество: {(string.IsNullOrWhiteSpace(quality) ? "ограничений регистрации не выявлено." : quality)}\n" +
+                package.Interpretation
+        };
+
+        var timeline = new DataGrid
+        {
+            AutoGenerateColumns = false,
+            IsReadOnly = true,
+            CanUserAddRows = false,
+            CanUserDeleteRows = false,
+            EnableRowVirtualization = true,
+            GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+            ItemsSource = BuildIncidentTimeline(incident)
+        };
+        timeline.Columns.Add(new DataGridTextColumn { Header = "От отметки", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.RelativeText)), Width = 95 });
+        timeline.Columns.Add(new DataGridTextColumn { Header = "Время", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.TimestampText)), Width = 185 });
+        timeline.Columns.Add(new DataGridTextColumn { Header = "Событие", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.Kind)), Width = 150 });
+        timeline.Columns.Add(new DataGridTextColumn { Header = "Детали", Binding = new System.Windows.Data.Binding(nameof(IncidentTimelineRow.Details)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+
+        var openCapture = new Button
+        {
+            Content = "Открыть capture.trc в анализаторе",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4)
+        };
+        var close = new Button
+        {
+            Content = "Закрыть",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4)
+        };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        buttons.Children.Add(openCapture);
+        buttons.Children.Add(close);
+
+        var layout = new Grid { Margin = new Thickness(12) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(summary, 0);
+        Grid.SetRow(timeline, 1);
+        Grid.SetRow(buttons, 2);
+        layout.Children.Add(summary);
+        layout.Children.Add(timeline);
+        layout.Children.Add(buttons);
+
+        var window = new Window
+        {
+            Owner = this,
+            Title = "CraneCAN — сохранённое событие",
+            Width = 980,
+            Height = 600,
+            MinWidth = 760,
+            MinHeight = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Content = layout
+        };
+
+        close.Click += (_, _) => window.Close();
+        openCapture.Click += async (_, _) =>
+        {
+            openCapture.IsEnabled = false;
+            if (await OpenIncidentCaptureAsync(package)) window.Close();
+            else openCapture.IsEnabled = true;
+        };
+
+        window.ShowDialog();
+    }
+
+    private static IReadOnlyList<IncidentTimelineRow> BuildIncidentTimeline(PreFaultIncident incident)
+    {
+        var markerOrigin = incident.Markers.OrderBy(marker => marker.Timestamp).First().Timestamp;
+        var rows = new List<(DateTimeOffset Timestamp, int Order, string Kind, string Details)>
+        {
+            (incident.WindowStart, 0, "Начало окна", "Левая граница сохранённой предыстории.")
+        };
+
+        if (incident.Frames.Count > 0)
+        {
+            rows.Add((incident.Frames[0].Timestamp, 1, "Первый CAN-кадр", FrameSummary(incident.Frames[0])));
+            rows.Add((incident.Frames[^1].Timestamp, 3, "Последний CAN-кадр", FrameSummary(incident.Frames[^1])));
+        }
+
+        foreach (var marker in incident.Markers)
+            rows.Add((marker.Timestamp, 2, "ОТМЕТКА", marker.Label));
+
+        rows.Add((incident.WindowEnd, 4, "Конец окна", "Правая граница окна после события."));
+        if (incident.ObservedUntil != incident.WindowEnd)
+            rows.Add((incident.ObservedUntil, 5, "Наблюдалось до", "Последний timestamp, на котором завершена оценка полноты."));
+
+        return rows
+            .OrderBy(row => row.Timestamp)
+            .ThenBy(row => row.Order)
+            .Select(row => new IncidentTimelineRow(
+                RelativeTime(row.Timestamp, markerOrigin),
+                row.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                row.Kind,
+                row.Details))
+            .ToArray();
+    }
+
+    private static string RelativeTime(DateTimeOffset timestamp, DateTimeOffset origin)
+    {
+        var seconds = (timestamp - origin).TotalSeconds;
+        return seconds >= 0 ? $"+{seconds:0.000} s" : $"{seconds:0.000} s";
+    }
+
+    private static string FrameSummary(CraneCAN.Core.Models.CanFrame frame)
+    {
+        var id = frame.IsExtended ? $"0x{frame.Id:X8} EXT" : $"0x{frame.Id:X3} STD";
+        var data = string.Join(" ", frame.Data.Select(value => value.ToString("X2")));
+        return $"{id} · DLC {frame.Dlc} · {data}";
+    }
+
+    private async Task<bool> OpenIncidentCaptureAsync(LoadedIncidentPackage package)
+    {
+        SetBusy(true, "Открытие capture.trc из incident-пакета…");
+        try
+        {
+            var import = await PcanTrcCodec.LoadWithDiagnosticsAsync(package.RawTracePath);
+            _loadedTrcPath = package.RawTracePath;
+            _loadedFrames = import.Frames;
+            BuildFrameRows();
+            BuildStatistics();
+            SetDefaultWindows();
+            LoadedFileText.Text = package.RawTracePath;
+            var framesTab = MainTabs.Items.OfType<TabItem>()
+                .FirstOrDefault(tab => string.Equals(tab.Header?.ToString(), "Generic CAN — кадры", StringComparison.Ordinal));
+            if (framesTab is not null) MainTabs.SelectedItem = framesTab;
+            StatusText.Text =
+                $"Открыт capture.trc события {package.Incident.IncidentId:N}: {import.Frames.Count:N0} кадров. " +
+                "Передача CAN отсутствует.";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(FormatException(exception), "Открытие capture.trc",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private sealed record IncidentTimelineRow(
+        string RelativeText,
+        string TimestampText,
+        string Kind,
+        string Details);
 }

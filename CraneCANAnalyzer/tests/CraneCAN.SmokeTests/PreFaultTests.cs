@@ -61,10 +61,29 @@ internal static class PreFaultTests
             using var json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
             Check(json.RootElement.GetProperty("captureOrigin").GetString() == "replay" &&
                   json.RootElement.GetProperty("complete").GetBoolean(), "Incident provenance not serialized.");
+
             var trc = Path.Combine(Path.GetDirectoryName(path)!, json.RootElement.GetProperty("rawTracePath").GetString()!);
             var restored = await PcanTrcCodec.LoadAsync(trc);
             Check(restored.Count == full.Frames.Count && restored.Select(frame => frame.Timestamp)
                 .SequenceEqual(full.Frames.Select(frame => frame.Timestamp)), "Incident TRC timestamps failed round-trip.");
+
+            var package = await PreFaultIncidentCodec.LoadAsync(path);
+            Check(package.Incident.IncidentId == full.IncidentId &&
+                  package.Incident.Frames.Count == full.Frames.Count &&
+                  package.Incident.Markers.Select(marker => marker.Label)
+                      .SequenceEqual(full.Markers.Select(marker => marker.Label)) &&
+                  package.Source.DriverId == source.DriverId &&
+                  package.RawTracePath == Path.GetFullPath(trc),
+                "Saved incident package failed validated reopen.");
+
+            var tamperedPath = Path.Combine(Path.GetDirectoryName(path)!, "tampered.canincident");
+            var tamperedJson = (await File.ReadAllTextAsync(path))
+                .Replace("\"rawTracePath\": \"capture.trc\"", "\"rawTracePath\": \"../capture.trc\"");
+            await File.WriteAllTextAsync(tamperedPath, tamperedJson);
+            await CheckThrowsAsync<FormatException>(
+                async () => { await PreFaultIncidentCodec.LoadAsync(tamperedPath); },
+                "Incident loader accepted a rawTracePath outside the package directory.");
+
             var secondPath = await PreFaultIncidentCodec.SaveAsync(folder, full, source);
             Check(secondPath != path && File.Exists(path), "Saving an incident overwrote a previous export.");
         }
@@ -80,5 +99,20 @@ internal static class PreFaultTests
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static async Task CheckThrowsAsync<TException>(Func<Task> action, string message)
+        where TException : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(message);
     }
 }
