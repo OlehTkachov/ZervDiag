@@ -3,12 +3,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using CraneCAN.Core.Analysis;
+using CraneCAN.Core.Storage;
 
 namespace CraneCAN.App;
 
 public partial class MainWindow
 {
     private void ShowIncidentEventChainWindow(
+        LoadedIncidentPackage package,
         IncidentTransitionAnalysisResult transition,
         Window owner)
     {
@@ -66,6 +68,14 @@ public partial class MainWindow
             Width = new DataGridLength(1, DataGridLengthUnitType.Star)
         });
 
+        var showTimeline = new Button
+        {
+            Content = "График DATA-шаг…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            IsEnabled = false,
+            ToolTip = "Показать raw DATA[n] выбранного ID во всём incident относительно marker."
+        };
         var addSignal = new Button
         {
             Content = "Добавить DATA-шаг в профиль…",
@@ -85,6 +95,7 @@ public partial class MainWindow
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(showTimeline);
         buttons.Children.Add(addSignal);
         buttons.Children.Add(close);
 
@@ -113,9 +124,20 @@ public partial class MainWindow
 
         grid.SelectionChanged += (_, _) =>
         {
-            addSignal.IsEnabled = grid.SelectedItem is IncidentEventChainRow row &&
-                                  row.Step.Kind == IncidentTransitionKind.ByteChanged &&
-                                  row.Step.DataIndex.HasValue;
+            var canUseByteStep = grid.SelectedItem is IncidentEventChainRow row &&
+                                 row.Step.Kind == IncidentTransitionKind.ByteChanged &&
+                                 row.Step.DataIndex.HasValue;
+            showTimeline.IsEnabled = canUseByteStep;
+            addSignal.IsEnabled = canUseByteStep;
+        };
+        showTimeline.Click += (_, _) =>
+        {
+            if (grid.SelectedItem is IncidentEventChainRow row &&
+                row.Step.Kind == IncidentTransitionKind.ByteChanged &&
+                row.Step.DataIndex.HasValue)
+            {
+                ShowIncidentSignalTimeline(package, row.Step, window);
+            }
         };
         addSignal.Click += (_, _) =>
         {

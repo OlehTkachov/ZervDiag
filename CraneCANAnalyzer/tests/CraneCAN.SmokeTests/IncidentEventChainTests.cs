@@ -1,5 +1,7 @@
 using CraneCAN.Core.Analysis;
 using CraneCAN.Core.Guided;
+using CraneCAN.Core.Live;
+using CraneCAN.Core.Models;
 using CraneCAN.Core.Profiles;
 
 internal static class IncidentEventChainTests
@@ -122,6 +124,129 @@ internal static class IncidentEventChainTests
         var infoGap = IncidentEventChainAnalyzer.Build(infoGapTransition, profile);
         Check(!infoGap.Steps[1].BreakpointCandidate,
             "Gap adjacent to an INFO-only step was incorrectly promoted to a breakpoint.");
+
+        RunTimelineTests(marker);
+    }
+
+    private static void RunTimelineTests(DateTimeOffset marker)
+    {
+        var frames = new List<CanFrame>();
+        for (var index = 0; index < 120; index++)
+        {
+            var value = index switch
+            {
+                < 40 => (byte)10,
+                < 80 => (byte)200,
+                _ => (byte)30
+            };
+            frames.Add(TimelineFrame(
+                marker.AddMilliseconds(-3000 + index * 50),
+                0x555,
+                false,
+                2,
+                value));
+        }
+
+        // Same numeric ID but Extended: must not contaminate Standard plot.
+        frames.Add(TimelineFrame(marker, 0x555, true, 2, 250));
+        // Too short DATA for DATA[1]: must be ignored.
+        frames.Add(new CanFrame
+        {
+            Timestamp = marker.AddMilliseconds(10),
+            Channel = 0,
+            Id = 0x555,
+            IsExtended = false,
+            Data = [0xAA],
+            Protocol = BusProtocol.ClassicalCan,
+            Direction = CanDirection.Rx
+        });
+        // Tx frame: must be ignored.
+        frames.Add(TimelineFrame(marker.AddMilliseconds(20), 0x555, false, 2, 240) with
+        {
+            Direction = CanDirection.Tx
+        });
+
+        var incident = new PreFaultIncident(
+            Guid.NewGuid(),
+            marker.AddSeconds(-10),
+            marker.AddSeconds(5),
+            marker.AddSeconds(5),
+            [new IncidentMarker(marker, "fault")],
+            frames,
+            []);
+
+        var step = new IncidentEventChainStep(
+            1,
+            0,
+            null,
+            0x555,
+            false,
+            1,
+            IncidentTransitionKind.ByteChanged,
+            IncidentTransitionPriority.High,
+            "0x0A",
+            "0xC8",
+            [],
+            null,
+            false,
+            string.Empty,
+            "timeline");
+
+        var timeline = IncidentSignalTimelineAnalyzer.Analyze(
+            incident,
+            step,
+            maximumRenderedPoints: 24);
+
+        Check(timeline.SourceFrameCount == 120 &&
+              timeline.RenderedPoints.Count <= 24 &&
+              timeline.MinimumRawValue == 10 &&
+              timeline.MaximumRawValue == 200,
+            "Incident DATA timeline filtering/downsampling is incorrect.");
+        Check(Math.Abs(timeline.RenderedPoints[0].RelativeMilliseconds - (-3000)) < 0.001 &&
+              Math.Abs(timeline.RenderedPoints[^1].RelativeMilliseconds - 2950) < 0.001,
+            "Incident DATA timeline did not preserve first/last samples.");
+        Check(timeline.RenderedPoints.Any(point => point.RawValue == 200) &&
+              timeline.RenderedPoints.Any(point => point.RawValue == 10) &&
+              timeline.RenderedPoints.Any(point => point.RawValue == 30),
+            "Incident DATA timeline downsampling lost an observed plateau/extreme.");
+        Check(timeline.Warnings.Any(text => text.Contains("визуализации", StringComparison.OrdinalIgnoreCase)),
+            "Timeline downsampling warning was not emitted.");
+
+        var invalidStepRejected = false;
+        try
+        {
+            IncidentSignalTimelineAnalyzer.Analyze(
+                incident,
+                step with { DataIndex = null, Kind = IncidentTransitionKind.IdAppeared });
+        }
+        catch (InvalidOperationException)
+        {
+            invalidStepRejected = true;
+        }
+        Check(invalidStepRejected,
+            "Incident timeline accepted a non-DATA event.");
+    }
+
+    private static CanFrame TimelineFrame(
+        DateTimeOffset timestamp,
+        uint id,
+        bool extended,
+        int dlc,
+        byte selectedValue)
+    {
+        var data = dlc == 1
+            ? new byte[] { selectedValue }
+            : new byte[] { 0x11, selectedValue };
+        return new CanFrame
+        {
+            Timestamp = timestamp,
+            Channel = 0,
+            Id = id,
+            IsExtended = extended,
+            Data = data,
+            Protocol = BusProtocol.ClassicalCan,
+            Direction = CanDirection.Rx
+        };
     }
 
     private static IncidentTransitionCandidate Candidate(

@@ -96,7 +96,7 @@ public partial class MainWindow
             Owner = owner, Title = "CraneCAN — Incident First Changes", Width = 1280, Height = 680,
             MinWidth = 940, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout
         };
-        chain.Click += (_, _) => ShowIncidentEventChainWindow(result, window);
+        chain.Click += (_, _) => ShowIncidentEventChainWindow(package, result, window);
         close.Click += (_, _) => window.Close();
         window.ShowDialog();
     }
