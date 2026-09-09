@@ -335,8 +335,11 @@ public partial class MainWindow
             try { _liveSession.AdvanceTo(timestamp); }
             catch (ArgumentOutOfRangeException) { }
         }
+        if (!IsReplaySource && _liveReceiver?.IsReceiving == true)
+            _liveReceiver.EvaluateNodeHealth(DateTimeOffset.UtcNow);
         UpdateLiveDisplay();
         UpdateIncidentDisplay();
+        UpdateNodeHealthDisplay();
         if (_liveSession?.State == LiveExperimentState.Analyzing && !_liveCompleting)
             _ = CompleteLiveExperimentAsync();
     }
@@ -344,12 +347,15 @@ public partial class MainWindow
     private LiveCanReceiver CreateLiveReceiver(ICanDriver driver)
     {
         var receiver = new LiveCanReceiver(driver, new LiveCanBuffer(TimeSpan.FromSeconds(120)));
+        _nodeHealthLastEventText = string.Empty;
         receiver.FrameReceived += frame =>
         {
             Interlocked.Exchange(ref _liveLastFrameUtcTicks, frame.Timestamp.UtcDateTime.Ticks);
             if (frame.IsExtended) Interlocked.Increment(ref _liveExtendedFrames);
             else Interlocked.Increment(ref _liveStandardFrames);
         };
+        receiver.NodeHealthChanged += healthEvent => Dispatcher.BeginInvoke(() =>
+            HandleNodeHealthEvent(receiver, healthEvent));
         receiver.ReplayEnded += () => Dispatcher.BeginInvoke(() =>
         {
             if (!ReferenceEquals(receiver, _liveReceiver)) return;

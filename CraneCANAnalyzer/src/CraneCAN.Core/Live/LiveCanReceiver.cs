@@ -23,10 +23,12 @@ public sealed class LiveCanReceiver : IAsyncDisposable
     }
 
     public event Action<CanFrame>? FrameReceived;
+    public event Action<NodeHealthEvent>? NodeHealthChanged;
     public event Action<string>? ReceiverFaulted;
     public event Action? ReplayEnded;
     public LiveCanBuffer Buffer { get; }
     public PreFaultRecorder Incidents { get; } = new();
+    public NodeHealthMonitor NodeHealth { get; } = new();
     public bool IsReceiving { get; private set; }
     public string? RawCapturePath { get; private set; }
     public DateTimeOffset? RawCaptureStart { get; private set; }
@@ -38,6 +40,12 @@ public sealed class LiveCanReceiver : IAsyncDisposable
             Buffer.TotalReceived, 0, 0, _driver.IsOpen ? "CONNECTED" : "DISCONNECTED");
 
     public void AttachSession(LiveExperimentSession? session) { lock (_sync) _session = session; }
+
+    public void EvaluateNodeHealth(DateTimeOffset timestamp)
+    {
+        foreach (var healthEvent in NodeHealth.Evaluate(timestamp))
+            PublishNodeHealth(healthEvent);
+    }
 
     public async Task StartAsync(CanChannelSettings settings, string rawCapturePath,
         DateTimeOffset captureStart, CancellationToken cancellationToken = default)
@@ -112,6 +120,9 @@ public sealed class LiveCanReceiver : IAsyncDisposable
                 if (status.LostFrames > 0 || status.ErrorFrames > 0 || !status.ListenOnlyConfirmed)
                     Incidents.MarkCaptureUncertain();
                 Incidents.Append(frame);
+                var recovery = NodeHealth.Observe(frame);
+                if (recovery is not null) PublishNodeHealth(recovery);
+                EvaluateNodeHealth(frame.Timestamp);
                 LiveExperimentSession? session; LiveTrcWriter? writer;
                 lock (_sync) { session = _session; writer = _writer; }
                 session?.AppendFrame(frame);
@@ -142,6 +153,11 @@ public sealed class LiveCanReceiver : IAsyncDisposable
             Incidents.Stop();
             IsReceiving = false;
         }
+    }
+
+    private void PublishNodeHealth(NodeHealthEvent healthEvent)
+    {
+        try { NodeHealthChanged?.Invoke(healthEvent); } catch { }
     }
 
     private void HandleUnexpectedStop(string message, Exception? exception)

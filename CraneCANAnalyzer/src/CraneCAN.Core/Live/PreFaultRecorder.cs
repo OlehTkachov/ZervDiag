@@ -47,6 +47,7 @@ public sealed class PreFaultRecorder
     }
 
     public bool IsCollecting { get { lock (_sync) return _active; } }
+    public DateTimeOffset? ActiveWindowEnd { get { lock (_sync) return _active ? _end : null; } }
     public PreFaultIncident? LastIncident { get { lock (_sync) return _last; } }
 
     public void Append(CanFrame frame)
@@ -72,7 +73,10 @@ public sealed class PreFaultRecorder
                 else _issues.Add("FRAME_LIMIT");
             }
             _history.Enqueue(owned);
-            while (_history.Count > 0 && _history.Peek().Timestamp < frame.Timestamp - _pre)
+            // Keep pre + post so an automatic health trigger detected up to one post-window
+            // late can still reconstruct the full prehistory without inventing frames.
+            var historyRetention = _pre + _post;
+            while (_history.Count > 0 && _history.Peek().Timestamp < frame.Timestamp - historyRetention)
                 _history.Dequeue();
             while (_history.Count > _maximumFrames)
                 _capacityEvictedUntil = _history.Dequeue().Timestamp;
@@ -86,25 +90,49 @@ public sealed class PreFaultRecorder
         lock (_sync)
         {
             if (!_now.HasValue) throw new InvalidOperationException("Сначала дождитесь CAN-кадров.");
-            if (_active)
-            {
-                if (_markers.Count >= 32) throw new InvalidOperationException("В одном событии допускается до 32 отметок.");
-                _markers.Add(new IncidentMarker(_now.Value, label));
-                return; // Same incident; keep the original bounded post window.
-            }
-            _id = Guid.NewGuid();
-            _start = _now.Value - _pre;
-            _end = _now.Value + _post;
-            _markers.Clear();
-            _markers.Add(new IncidentMarker(_now.Value, label));
-            _incidentFrames.Clear();
-            _incidentFrames.AddRange(_history.Where(frame => frame.Timestamp >= _start));
-            _issues.Clear();
-            if (_firstObserved > _start) _issues.Add("SHORT_PREHISTORY");
-            if (_capacityEvictedUntil >= _start) _issues.Add("PREHISTORY_FRAME_LIMIT");
-            if (_streamUncertain) _issues.Add("CAPTURE_UNCERTAIN");
-            _active = true;
+            MarkAtLocked(_now.Value, label);
         }
+    }
+
+    public void MarkAt(DateTimeOffset timestamp, string label)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        lock (_sync)
+        {
+            if (!_now.HasValue) throw new InvalidOperationException("Сначала дождитесь CAN-кадров.");
+            MarkAtLocked(timestamp, label);
+        }
+    }
+
+    private void MarkAtLocked(DateTimeOffset timestamp, string label)
+    {
+        if (_active)
+        {
+            if (timestamp >= _end)
+                throw new InvalidOperationException("Новая отметка находится за пределами активного incident-окна.");
+            if (_markers.Count >= 32)
+                throw new InvalidOperationException("В одном событии допускается до 32 отметок.");
+            _markers.Add(new IncidentMarker(timestamp, label));
+            return; // Same incident; keep the original bounded post window.
+        }
+
+        _id = Guid.NewGuid();
+        _start = timestamp - _pre;
+        _end = timestamp + _post;
+        _markers.Clear();
+        _markers.Add(new IncidentMarker(timestamp, label));
+        _incidentFrames.Clear();
+        _incidentFrames.AddRange(_history.Where(frame =>
+            frame.Timestamp >= _start && frame.Timestamp < _end));
+        _issues.Clear();
+        if (_firstObserved > _start) _issues.Add("SHORT_PREHISTORY");
+        if (_capacityEvictedUntil >= _start) _issues.Add("PREHISTORY_FRAME_LIMIT");
+        if (_streamUncertain) _issues.Add("CAPTURE_UNCERTAIN");
+
+        if (_now!.Value >= _end)
+            Finish(_now.Value);
+        else
+            _active = true;
     }
 
     public void MarkCaptureUncertain()

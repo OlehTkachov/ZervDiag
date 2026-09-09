@@ -188,6 +188,12 @@
                                         Click="IncidentSaveButton_Click" IsEnabled="False" />
                                 <Button Content="Открыть .canincident…"
                                         Click="IncidentOpenButton_Click" />
+                                <CheckBox x:Name="NodeHealthAutoTriggerCheckBox"
+                                          Content="Авто-триггер: пропажа периодического CAN ID"
+                                          IsChecked="False" Margin="4"
+                                          ToolTip="Только пассивная запись. ID должен наблюдаться стабильно не менее 10 секунд." />
+                                <TextBlock x:Name="NodeHealthStatusText" Text="Node Health: нет активного потока."
+                                           TextWrapping="Wrap" MaxWidth="300" Margin="4" />
                                 <TextBlock x:Name="IncidentStatusText" Text="Предыстория: ожидание потока"
                                            TextWrapping="Wrap" MaxWidth="300" Margin="4" />
                             </StackPanel>

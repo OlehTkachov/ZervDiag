@@ -53,6 +53,20 @@ internal static class PreFaultTests
         copied.Stop();
         Check(copied.LastIncident!.Frames[0].Data[0] == 0, "Receive buffer mutation changed incident evidence.");
 
+        var automatic = new PreFaultRecorder();
+        for (var second = 0; second <= 12; second++) automatic.Append(Frame(second));
+        automatic.MarkAt(DateTimeOffset.UnixEpoch.AddSeconds(11.5), "AUTO NODE HEALTH");
+        Check(automatic.IsCollecting &&
+              automatic.ActiveWindowEnd == DateTimeOffset.UnixEpoch.AddSeconds(16.5),
+            "Retrospective automatic marker did not preserve its own event time.");
+        for (var second = 13; second <= 17; second++) automatic.Append(Frame(second));
+        Check(automatic.LastIncident is { Complete: true } automaticIncident &&
+              automaticIncident.Markers.Single().Timestamp == DateTimeOffset.UnixEpoch.AddSeconds(11.5) &&
+              automaticIncident.Frames.All(frame =>
+                  frame.Timestamp >= automaticIncident.WindowStart &&
+                  frame.Timestamp < automaticIncident.WindowEnd),
+            "Automatic incident marker did not produce a bounded complete capture.");
+
         var folder = Path.Combine(Path.GetTempPath(), $"cranecan-incident-tests-{Guid.NewGuid():N}");
         try
         {
