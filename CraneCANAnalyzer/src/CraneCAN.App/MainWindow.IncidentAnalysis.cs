@@ -69,19 +69,34 @@ public partial class MainWindow
         grid.Columns.Add(new DataGridTextColumn { Header = "Повтор", Binding = new Binding(nameof(IncidentTransitionRow.ConfirmationText)), Width = 75 });
         grid.Columns.Add(new DataGridTextColumn { Header = "Интерпретация", Binding = new Binding(nameof(IncidentTransitionRow.Description)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
 
-        var close = new Button { Content = "Закрыть", Padding = new Thickness(14, 6, 14, 6), Margin = new Thickness(4), HorizontalAlignment = HorizontalAlignment.Right };
+        var chain = new Button
+        {
+            Content = "Цепочка событий",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4)
+        };
+        var close = new Button { Content = "Закрыть", Padding = new Thickness(14, 6, 14, 6), Margin = new Thickness(4) };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        buttons.Children.Add(chain);
+        buttons.Children.Add(close);
+
         var layout = new Grid { Margin = new Thickness(12) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetRow(summary, 0); Grid.SetRow(grid, 1); Grid.SetRow(close, 2);
-        layout.Children.Add(summary); layout.Children.Add(grid); layout.Children.Add(close);
+        Grid.SetRow(summary, 0); Grid.SetRow(grid, 1); Grid.SetRow(buttons, 2);
+        layout.Children.Add(summary); layout.Children.Add(grid); layout.Children.Add(buttons);
 
         var window = new Window
         {
             Owner = owner, Title = "CraneCAN — Incident First Changes", Width = 1280, Height = 680,
             MinWidth = 940, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout
         };
+        chain.Click += (_, _) => ShowIncidentEventChainWindow(result, window);
         close.Click += (_, _) => window.Close();
         window.ShowDialog();
     }
