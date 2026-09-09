@@ -183,13 +183,26 @@ public partial class MainWindow
             Width = new DataGridLength(1, DataGridLengthUnitType.Star)
         });
 
+        var saveReport = new Button
+        {
+            Content = "Сохранить отчёт…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            ToolTip = "Сохранить переносимый Markdown-отчёт без абсолютных локальных путей."
+        };
         var close = new Button
         {
             Content = "Закрыть",
             Padding = new Thickness(14, 6, 14, 6),
-            Margin = new Thickness(4),
+            Margin = new Thickness(4)
+        };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(saveReport);
+        buttons.Children.Add(close);
 
         var layout = new Grid { Margin = new Thickness(12) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -197,10 +210,10 @@ public partial class MainWindow
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(summary, 0);
         Grid.SetRow(grid, 1);
-        Grid.SetRow(close, 2);
+        Grid.SetRow(buttons, 2);
         layout.Children.Add(summary);
         layout.Children.Add(grid);
-        layout.Children.Add(close);
+        layout.Children.Add(buttons);
 
         var window = new Window
         {
@@ -214,6 +227,42 @@ public partial class MainWindow
             Content = layout
         };
 
+        saveReport.Click += async (_, _) =>
+        {
+            var saveDialog = new SaveFileDialog
+            {
+                Title = "Сохранить отчёт GOOD/FAULT incident",
+                Filter = "Markdown (*.md)|*.md|Текст (*.txt)|*.txt",
+                DefaultExt = ".md",
+                AddExtension = true,
+                FileName = $"CraneCAN_incident_compare_{DateTime.Now:yyyyMMdd_HHmmss}.md"
+            };
+            if (saveDialog.ShowDialog(window) != true) return;
+
+            saveReport.IsEnabled = false;
+            try
+            {
+                await IncidentComparisonReportCodec.SaveAsync(
+                    saveDialog.FileName,
+                    baselinePackage,
+                    currentPackage,
+                    result,
+                    _machineProfile);
+                StatusText.Text = $"Отчёт сравнения incident сохранён: {saveDialog.FileName}";
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(
+                    FormatException(exception),
+                    "Сохранение отчёта incident",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                saveReport.IsEnabled = true;
+            }
+        };
         close.Click += (_, _) => window.Close();
         window.ShowDialog();
     }

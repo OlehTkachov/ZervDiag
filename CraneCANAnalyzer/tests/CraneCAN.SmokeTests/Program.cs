@@ -886,6 +886,7 @@ IncidentTransitionTests.Run();
 IncidentEventChainTests.Run();
 await IncidentSignalBuilderTests.RunAsync();
 IncidentEventChainComparisonTests.Run();
+await IncidentComparisonReportTests.RunAsync();
 Console.WriteLine("CraneCAN smoke tests passed.");
 return;
 
