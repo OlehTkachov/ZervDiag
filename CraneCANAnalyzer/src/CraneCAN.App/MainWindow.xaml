@@ -22,6 +22,8 @@
                     <Button x:Name="ClearButton" Content="Очистить" Click="ClearButton_Click" />
                     <Button Content="Снимок CAN…" Click="ConfigurationSnapshotButton_Click"
                             ToolTip="Сохранить read-only снимок наблюдаемой CAN-шины и текущего профиля машины" />
+                    <Button Content="Сравнить снимки…" Click="ConfigurationSnapshotCompareButton_Click"
+                            ToolTip="Сравнить два сохранённых .cansnapshot без передачи CAN" />
                 </WrapPanel>
                 <TextBlock x:Name="LoadedFileText" Grid.Column="1" Margin="12,0"
                            Text="TRC не открыт" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
