@@ -166,7 +166,7 @@ public static class CraneProjectPackageHashManifestCodec
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var value = path.Trim().Replace('\\', '/');
-        if (value.StartsWith('/', StringComparison.Ordinal) ||
+        if (value.StartsWith("/", StringComparison.Ordinal) ||
             (value.Length >= 2 && char.IsLetter(value[0]) && value[1] == ':'))
         {
             throw new FormatException("Package SHA-256 manifest содержит абсолютный path.");
