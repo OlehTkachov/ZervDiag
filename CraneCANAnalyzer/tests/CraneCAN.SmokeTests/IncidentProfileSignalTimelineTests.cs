@@ -12,8 +12,13 @@ internal static class IncidentProfileSignalTimelineTests
         DecoderCrossByteLittleEndian();
         DecoderSigned();
         DecoderSixtyFourBitBoundary();
-        BigEndianIsExplicitlyRejected();
+        DecoderBigEndianByteAligned();
+        DecoderBigEndianSawtoothCrossByte();
+        DecoderBigEndianSignedScaled();
+        DecoderBigEndianSixtyFourBitBoundary();
+        BigEndianOutOfClassicalCanIsRejected();
         TimelineFiltersAndDecodes();
+        TimelineBigEndianDecodes();
         TimelineDownsamplingPreservesExtremes();
     }
 
@@ -105,28 +110,119 @@ internal static class IncidentProfileSignalTimelineTests
             "64-bit LittleEndian boundary decode is incorrect.");
     }
 
-    private static void BigEndianIsExplicitlyRejected()
+    private static void DecoderBigEndianByteAligned()
+    {
+        var signal8 = Signal(
+            startByte: 0,
+            startBit: 7,
+            bitLength: 8) with
+        {
+            ByteOrder = SignalByteOrder.BigEndian
+        };
+        var value8 = MachineSignalDecoder.Decode(signal8, new byte[] { 0x12 });
+
+        var signal16 = signal8 with { BitLength = 16 };
+        var value16 = MachineSignalDecoder.Decode(
+            signal16,
+            new byte[] { 0x12, 0x34 });
+
+        Check(value8.RawUnsigned == 0x12 &&
+              value16.RawUnsigned == 0x1234 &&
+              MachineSignalDecoder.RequiredDataLength(signal16) == 2 &&
+              MachineSignalDecoder.CoversDataByte(signal16, 0) &&
+              MachineSignalDecoder.CoversDataByte(signal16, 1),
+            "Byte-aligned BigEndian/DBC sawtooth decode is incorrect.");
+    }
+
+    private static void DecoderBigEndianSawtoothCrossByte()
+    {
+        var signal = Signal(
+            startByte: 1,
+            startBit: 3,
+            bitLength: 12) with
+        {
+            ByteOrder = SignalByteOrder.BigEndian
+        };
+
+        var value = MachineSignalDecoder.Decode(
+            signal,
+            new byte[] { 0x00, 0x0A, 0xBC });
+
+        Check(value.RawUnsigned == 0xABC &&
+              MachineSignalDecoder.RequiredDataLength(signal) == 3 &&
+              !MachineSignalDecoder.CoversDataByte(signal, 0) &&
+              MachineSignalDecoder.CoversDataByte(signal, 1) &&
+              MachineSignalDecoder.CoversDataByte(signal, 2),
+            "Non-byte-aligned BigEndian/DBC sawtooth extraction is incorrect.");
+    }
+
+    private static void DecoderBigEndianSignedScaled()
+    {
+        var signal = Signal(
+            startByte: 0,
+            startBit: 7,
+            bitLength: 16,
+            signed: true,
+            scale: 0.5,
+            offset: 10) with
+        {
+            ByteOrder = SignalByteOrder.BigEndian
+        };
+
+        var value = MachineSignalDecoder.Decode(
+            signal,
+            new byte[] { 0xFF, 0x80 });
+
+        Check(value.RawUnsigned == 0xFF80 &&
+              value.RawSigned == -128 &&
+              Math.Abs(value.EngineeringValue - (-54)) < 0.000001,
+            "Signed/scaled BigEndian decode is incorrect.");
+    }
+
+    private static void DecoderBigEndianSixtyFourBitBoundary()
+    {
+        var signal = Signal(
+            startByte: 0,
+            startBit: 7,
+            bitLength: 64) with
+        {
+            ByteOrder = SignalByteOrder.BigEndian
+        };
+
+        var value = MachineSignalDecoder.Decode(
+            signal,
+            new byte[]
+            {
+                0x01, 0x23, 0x45, 0x67,
+                0x89, 0xAB, 0xCD, 0xEF
+            });
+
+        Check(value.RawUnsigned == 0x0123456789ABCDEFUL &&
+              MachineSignalDecoder.RequiredDataLength(signal) == 8,
+            "64-bit BigEndian boundary decode is incorrect.");
+    }
+
+    private static void BigEndianOutOfClassicalCanIsRejected()
     {
         var rejected = false;
         try
         {
-            MachineSignalDecoder.Decode(
+            MachineSignalDecoder.ValidateDefinition(
                 Signal(
                     startByte: 0,
                     startBit: 0,
-                    bitLength: 16) with
+                    bitLength: 64) with
                 {
                     ByteOrder = SignalByteOrder.BigEndian
-                },
-                new byte[] { 0x12, 0x34 });
+                });
         }
-        catch (NotSupportedException)
+        catch (ArgumentOutOfRangeException)
         {
             rejected = true;
         }
 
         Check(rejected,
-            "BigEndian signal was decoded even though its bit-numbering convention is not defined.");
+            "BigEndian field extending beyond Classical CAN DATA[0..7] was accepted.");
     }
 
     private static void TimelineFiltersAndDecodes()
@@ -187,6 +283,37 @@ internal static class IncidentProfileSignalTimelineTests
               result.Warnings.Any(warning =>
                   warning.Contains("короткого DLC", StringComparison.OrdinalIgnoreCase)),
             "Profile timeline engineering values/range/warnings are incorrect.");
+    }
+
+    private static void TimelineBigEndianDecodes()
+    {
+        var marker = DateTimeOffset.UnixEpoch.AddSeconds(15);
+        var signal = Signal(
+            startByte: 0,
+            startBit: 7,
+            bitLength: 16,
+            scale: 0.1) with
+        {
+            ByteOrder = SignalByteOrder.BigEndian
+        };
+        var frames = new[]
+        {
+            Frame(marker.AddMilliseconds(-10), 0x123, false, CanDirection.Rx, [0x01, 0x00]),
+            Frame(marker.AddMilliseconds(10), 0x123, false, CanDirection.Rx, [0x02, 0x00]),
+            Frame(marker.AddMilliseconds(20), 0x123, false, CanDirection.Rx, [0xFF])
+        };
+
+        var result = IncidentProfileSignalTimelineAnalyzer.Analyze(
+            Incident(marker, frames),
+            Step(10, 0x123, false, 1),
+            signal);
+
+        Check(result.MatchingFrameCount == 3 &&
+              result.ShortFrameCount == 1 &&
+              result.SourceFrameCount == 2 &&
+              Math.Abs(result.RenderedPoints[0].EngineeringValue - 25.6) < 0.000001 &&
+              Math.Abs(result.RenderedPoints[1].EngineeringValue - 51.2) < 0.000001,
+            "BigEndian Profile timeline decode/DLC handling is incorrect.");
     }
 
     private static void TimelineDownsamplingPreservesExtremes()

@@ -34,7 +34,7 @@ public partial class MainWindow
         if (matches.Length == 0)
         {
             MessageBox.Show(
-                "В текущем Machine Profile нет сигнала, поле которого пересекает выбранный DATA[n]. " +
+                "В текущем Machine Profile нет декодируемого сигнала, поле которого пересекает выбранный DATA[n]. " +
                 "Сначала используйте «Добавить DATA-шаг в профиль…» либо Cross-Incident → Machine Profile.",
                 "Profile signal timeline",
                 MessageBoxButton.OK,
@@ -42,26 +42,10 @@ public partial class MainWindow
             return;
         }
 
-        var decodable = matches
-            .Where(signal =>
-                signal.ByteOrder == SignalByteOrder.LittleEndian)
-            .ToArray();
-
-        if (decodable.Length == 0)
-        {
-            MessageBox.Show(
-                "Для выбранного DATA[n] найдены только BigEndian/Motorola сигналы. " +
-                "CraneCAN пока намеренно не декодирует их: конвенция нумерации битов BigEndian в Machine Profile не определена однозначно.",
-                "Profile signal timeline",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
-
-        var signal = decodable.Length == 1
-            ? decodable[0]
+        var signal = matches.Length == 1
+            ? matches[0]
             : ChooseIncidentProfileSignal(
-                decodable,
+                matches,
                 owner);
         if (signal is null)
             return;
@@ -77,23 +61,22 @@ public partial class MainWindow
         MachineSignal signal,
         IncidentEventChainStep step)
     {
-        if (!step.DataIndex.HasValue ||
-            signal.StartByte is < 0 or > 7 ||
-            signal.StartBit is < 0 or > 7 ||
-            signal.BitLength is < 1 or > 64)
+        if (!step.DataIndex.HasValue)
+            return false;
+
+        try
         {
+            return MachineSignalDecoder.CoversDataByte(
+                signal,
+                step.DataIndex.Value);
+        }
+        catch
+        {
+            // An invalid signal definition is not a valid timeline candidate.
+            // The Machine Profile evidence/editor remains responsible for
+            // correcting the definition; the selection list does not guess.
             return false;
         }
-
-        var firstBit = signal.StartByte * 8 + signal.StartBit;
-        var lastBitExclusive = firstBit + signal.BitLength;
-        if (lastBitExclusive > 64)
-            return false;
-
-        var firstByte = firstBit / 8;
-        var lastByte = (lastBitExclusive - 1) / 8;
-        return step.DataIndex.Value >= firstByte &&
-               step.DataIndex.Value <= lastByte;
     }
 
     private static int IncidentProfileSignalConfidenceRank(
@@ -128,7 +111,7 @@ public partial class MainWindow
         var info = new TextBlock
         {
             Text =
-                "Несколько LittleEndian сигналов Machine Profile пересекают выбранный DATA[n]. Выберите, какой декодировать.",
+                "Несколько сигналов Machine Profile пересекают выбранный DATA[n]. Выберите, какой декодировать. ByteOrder отображается явно.",
             TextWrapping = TextWrapping.Wrap
         };
 
@@ -236,7 +219,7 @@ public partial class MainWindow
             Text =
                 $"Signal: {signal.Name} · {signal.Confidence.ToString().ToUpperInvariant()}\n" +
                 $"{(signal.IsExtended ? "Extended" : "Standard")} ID 0x{signal.CanId.ToString(signal.IsExtended ? "X8" : "X3", CultureInfo.InvariantCulture)} · " +
-                $"field DATA[{signal.StartByte}] bit {signal.StartBit}, {signal.BitLength} bit, LittleEndian, " +
+                $"field DATA[{signal.StartByte}] bit {signal.StartBit}, {signal.BitLength} bit, {signal.ByteOrder}, " +
                 $"{(signal.IsSigned ? "signed" : "unsigned")} · scale {FormatIncidentProfileNumber(signal.Scale)} · " +
                 $"offset {FormatIncidentProfileNumber(signal.Offset)}{unit}.\n" +
                 $"Кадров ID: {result.MatchingFrameCount:N0}; декодировано: {result.SourceFrameCount:N0}; " +
@@ -246,6 +229,7 @@ public partial class MainWindow
                 $"Marker = 0.000 s; кандидат перехода = {FormatTimelineSeconds(result.TransitionMilliseconds)}.\n" +
                 warnings + "\n" +
                 "Engineering value вычислено строго по текущему Machine Profile. " +
+                "BigEndian использует явно определённую DBC/Motorola sawtooth convention. " +
                 "График не доказывает физическое назначение сигнала; raw DATA-график остаётся независимым источником evidence."
         };
 
@@ -481,6 +465,7 @@ public partial class MainWindow
             $"{(string.IsNullOrWhiteSpace(Signal.Name) ? "(без имени)" : Signal.Name)} · " +
             $"{Signal.Confidence.ToString().ToUpperInvariant()} · " +
             $"DATA[{Signal.StartByte}] bit {Signal.StartBit}, {Signal.BitLength} bit · " +
+            $"{Signal.ByteOrder} · " +
             $"{(Signal.IsSigned ? "signed" : "unsigned")} · " +
             $"scale {FormatIncidentProfileNumber(Signal.Scale)}, offset {FormatIncidentProfileNumber(Signal.Offset)}";
     }

@@ -20,40 +20,79 @@ CraneCAN ищет в `KnownSignals` и `ExperimentalSignals` текущего Ma
 - точный CAN ID;
 - точный Standard/Extended формат;
 - поле, пересекающее изменившийся `DATA[n]`;
-- статус, отличный от `REJECTED`.
+- статус, отличный от `REJECTED`;
+- корректную геометрию поля для выбранного ByteOrder.
 
-Если подходящих LittleEndian сигналов несколько, инженер явно выбирает сигнал
-из списка. Назначение сигнала не угадывается автоматически.
+Если подходящих сигналов несколько, инженер явно выбирает сигнал из списка.
+`LittleEndian` / `BigEndian` отображается в выборе. Назначение сигнала не
+угадывается автоматически.
 
 ## LittleEndian convention
 
-На этом этапе декодирование намеренно поддерживает только `LittleEndian`.
-
-Определена следующая точная конвенция:
+Для `SignalByteOrder.LittleEndian` определена следующая точная конвенция:
 
 - bit 0 = младший бит `DATA[0]`;
-- абсолютный младший бит поля =
-  `StartByte * 8 + StartBit`;
+- абсолютный младший бит поля = `StartByte * 8 + StartBit`;
 - поле занимает `BitLength` последовательных битов с возрастающими номерами;
 - байты собираются как little-endian целое:
   `DATA[0] + DATA[1]<<8 + DATA[2]<<16 + ...`;
 - после выделения поля выполняется sign extension, если `IsSigned = true`;
-- инженерное значение:
-  `raw * Scale + Offset`.
+- инженерное значение: `raw * Scale + Offset`.
 
-Поддерживаются поля длиной 1…64 бит, включая пересечение границы байтов.
+## BigEndian / DBC Motorola sawtooth convention
 
-## Почему BigEndian пока блокируется
+`SignalByteOrder.BigEndian` теперь поддерживается по **явно зафиксированной
+DBC/Motorola sawtooth convention**. CraneCAN больше не угадывает одну из
+нескольких несовместимых трактовок Motorola.
 
-`SignalByteOrder.BigEndian` уже присутствует в схеме Machine Profile, но
-однозначная Motorola/DBC-конвенция нумерации `StartBit` для него в CraneCAN
-пока не определена.
+Правила:
 
-Поэтому BigEndian **не декодируется по догадке**. Попытка декодирования
-возвращает явное `NotSupportedException`, а UI объясняет причину.
+- внутри каждого DATA-байта `bit 0 = LSB`, `bit 7 = MSB`;
+- `StartByte / StartBit` указывает **старший значащий бит (MSB)** сигнала;
+- следующие биты поля идут к меньшим номерам bit внутри текущего байта;
+- после `bit 0` следующий бит — `bit 7` следующего DATA-байта;
+- raw-значение собирается MSB-first;
+- затем выполняется sign extension, если `IsSigned = true`;
+- инженерное значение: `raw * Scale + Offset`.
 
-Это предотвращает опасную ситуацию, когда корректный CAN payload отображается
-как убедительное, но неверное инженерное значение.
+Контрольные примеры:
+
+```text
+DATA = 12 34
+StartByte=0 StartBit=7 BitLength=16 BigEndian
+raw = 0x1234
+```
+
+```text
+DATA = 00 0A BC
+StartByte=1 StartBit=3 BitLength=12 BigEndian
+bits = DATA[1].3..0 + DATA[2].7..0
+raw = 0xABC
+```
+
+Таким образом, `StartBit` для BigEndian не является младшим битом поля: он
+является его MSB согласно выбранной sawtooth convention.
+
+## Диапазон поля
+
+Для обоих ByteOrder поддерживаются поля длиной 1…64 бит.
+
+Поле обязано полностью помещаться в Classical CAN `DATA[0…7]`. Для BigEndian
+это проверяется по фактическому sawtooth-переходу между байтами. Например,
+`StartByte=0, StartBit=7, BitLength=64` допустим, а
+`StartByte=0, StartBit=0, BitLength=64` потребовал бы девятый байт и поэтому
+отклоняется.
+
+## Signed / Scale / Offset
+
+После извлечения raw bits порядок байтов больше не влияет на математическую
+интерпретацию:
+
+- unsigned: `RawUnsigned`;
+- signed: two's-complement sign extension по `BitLength`;
+- engineering: `raw * Scale + Offset`.
+
+Для 64-bit signed используется полный two's-complement диапазон `Int64`.
 
 ## Фильтрация кадров
 
@@ -65,7 +104,7 @@ CraneCAN ищет в `KnownSignals` и `ExperimentalSignals` текущего Ma
 - точный Standard/Extended;
 - не RTR;
 - не error frame;
-- DLC/длина DATA достаточна для полного битового поля.
+- DLC/длина DATA достаточна для полного битового поля с учётом ByteOrder.
 
 Совпадающие кадры с коротким DATA пропускаются и учитываются в предупреждении.
 
@@ -80,7 +119,8 @@ Y — `raw * Scale + Offset` в единицах Machine Profile.
 - `MARKER`;
 - `CHANGE` из выбранного Event Chain шага;
 - min/max engineering value;
-- количество совпавших, декодированных и коротких кадров.
+- количество совпавших, декодированных и коротких кадров;
+- ByteOrder и геометрия поля.
 
 Для больших рядов применяется downsampling с сохранением:
 
@@ -99,3 +139,13 @@ Machine Profile определяет способ декодирования, н
 профиль так интерпретирует эти биты. Для CONFIRMED назначения нужны независимые
 evidence: схема, документация, повторяемый эксперимент, измерение или
 физическая проверка.
+
+Поддержка BigEndian также не означает автоматического определения endian.
+ByteOrder должен быть задан в Machine Profile либо импортирован из источника
+с известной конвенцией, например будущего DBC importer.
+
+## Безопасность CAN
+
+Декодирование LittleEndian/BigEndian работает только с уже полученными
+CAN-кадрами. Оно не открывает transmit path и не меняет LISTEN ONLY архитектуру
+CraneCAN.
