@@ -14,6 +14,7 @@ public sealed record ProjectPackageImportResult(
     long UncompressedBytes,
     long ArchiveBytes,
     string ArchiveSha256,
+    string PackageManifestSha256,
     IReadOnlyList<ProjectPackageFileFingerprint> Files,
     ProjectIntegrityReport PackageIntegrity);
 
@@ -21,10 +22,9 @@ public sealed record ProjectPackageImportResult(
 /// Safely imports a CraneCAN ZIP package into a new directory. The importer
 /// rejects path traversal, Windows alternate-data-stream syntax, duplicate
 /// normalized paths, symlinks/special entries, unexpected files, incomplete
-/// manifests and any destination that already exists. Files are first
-/// extracted into a sibling staging directory, hashed while extracting and
-/// checked with Project Integrity before the staging directory is renamed to
-/// the requested destination. Existing user files are never overwritten.
+/// manifests and any destination that already exists. Every payload file is
+/// checked against the internal SHA-256 package manifest before publication.
+/// Existing user files are never overwritten.
 /// </summary>
 public static class CraneProjectPackageImporter
 {
@@ -32,6 +32,7 @@ public static class CraneProjectPackageImporter
     private const int MaxFileEntries = 20_000;
     private const long MaxSingleEntryBytes = 128L * 1024 * 1024 * 1024;
     private const long MaxTotalUncompressedBytes = 256L * 1024 * 1024 * 1024;
+    private const long MaxHashManifestBytes = 16L * 1024 * 1024;
 
     public static async Task<ProjectPackageImportResult> ImportZipAsync(
         string archivePath,
@@ -74,29 +75,51 @@ public static class CraneProjectPackageImporter
             var scan = ScanArchive(archive);
             EnsureEnoughFreeSpace(parentDirectory, scan.TotalUncompressedBytes);
 
-            var manifestEntry = scan.Files.Single(file => file.IsManifest).Entry;
+            var hashManifestScanned = scan.Files.Single(file => file.IsHashManifest);
+            var stagedHashManifestPath = SafeDestinationPath(
+                stagingRoot,
+                hashManifestScanned.NormalizedName);
+            var hashManifestFingerprint = await ExtractAndHashAsync(
+                    hashManifestScanned.Entry,
+                    stagedHashManifestPath,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var hashManifest = CraneProjectPackageHashManifestCodec.Load(
+                stagedHashManifestPath);
+            var hashExpectations = BuildHashExpectations(hashManifest);
+
+            var projectScanned = scan.Files.Single(file => file.IsProjectManifest);
             var stagedProjectPath = SafeDestinationPath(
                 stagingRoot,
-                manifestEntry.FullName);
-            var manifestFingerprint = await ExtractAndHashAsync(
-                    manifestEntry,
+                projectScanned.NormalizedName);
+            var projectFingerprint = await ExtractAndHashAsync(
+                    projectScanned.Entry,
                     stagedProjectPath,
                     cancellationToken)
                 .ConfigureAwait(false);
+            VerifyFingerprint(projectFingerprint, hashExpectations);
 
             var stagedProject = CraneProjectCodec.Load(stagedProjectPath);
             var expectedEntries = BuildExpectedEntries(
                 stagedProject,
-                manifestFingerprint.EntryName);
-            ValidateArchiveMatchesManifest(scan.Files, expectedEntries);
+                projectFingerprint.EntryName);
+            ValidateHashManifestMatchesProject(
+                hashManifest,
+                stagedProject,
+                expectedEntries,
+                hashExpectations);
+            ValidateArchiveMatchesProject(
+                scan.Files,
+                expectedEntries);
 
             var fingerprints = new List<ProjectPackageFileFingerprint>(scan.Files.Count)
             {
-                manifestFingerprint
+                hashManifestFingerprint,
+                projectFingerprint
             };
 
             foreach (var scanned in scan.Files
-                         .Where(file => !file.IsManifest)
+                         .Where(file => !file.IsProjectManifest && !file.IsHashManifest)
                          .OrderBy(file => file.NormalizedName, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -108,6 +131,7 @@ public static class CraneProjectPackageImporter
                         destinationPath,
                         cancellationToken)
                     .ConfigureAwait(false);
+                VerifyFingerprint(fingerprint, hashExpectations);
                 fingerprints.Add(fingerprint);
             }
 
@@ -149,6 +173,7 @@ public static class CraneProjectPackageImporter
                 extractedBytes,
                 archiveFingerprint.Length,
                 archiveFingerprint.Sha256,
+                hashManifestFingerprint.Sha256,
                 fingerprints
                     .OrderBy(file => file.EntryName, StringComparer.OrdinalIgnoreCase)
                     .ToArray(),
@@ -203,6 +228,11 @@ public static class CraneProjectPackageImporter
                 throw new InvalidDataException(
                     $"Недопустимый размер ZIP entry: {normalizedName}.");
             }
+            if (IsHashManifest(normalizedName) && entry.Length > MaxHashManifestBytes)
+            {
+                throw new InvalidDataException(
+                    "Внутренний package SHA-256 manifest превышает безопасный лимит 16 MiB.");
+            }
 
             checked
             {
@@ -228,7 +258,8 @@ public static class CraneProjectPackageImporter
             files.Add(new ScannedEntry(
                 entry,
                 normalizedName,
-                IsRootManifest(normalizedName)));
+                IsRootProjectManifest(normalizedName),
+                IsHashManifest(normalizedName)));
         }
 
         if (files.Count == 0)
@@ -236,17 +267,27 @@ public static class CraneProjectPackageImporter
 
         ValidateFileDirectoryCollisions(fileNames);
 
-        var allManifests = files
+        var allProjectManifests = files
             .Where(file => string.Equals(
                 Path.GetExtension(file.NormalizedName),
                 ".canproject",
                 StringComparison.OrdinalIgnoreCase))
             .ToArray();
-        var rootManifests = allManifests.Where(file => file.IsManifest).ToArray();
-        if (allManifests.Length != 1 || rootManifests.Length != 1)
+        var rootProjectManifests = allProjectManifests
+            .Where(file => file.IsProjectManifest)
+            .ToArray();
+        if (allProjectManifests.Length != 1 || rootProjectManifests.Length != 1)
         {
             throw new InvalidDataException(
                 "CraneCAN ZIP package должен содержать ровно один *.canproject в корне архива.");
+        }
+
+        var hashManifests = files.Where(file => file.IsHashManifest).ToArray();
+        if (hashManifests.Length != 1)
+        {
+            throw new InvalidDataException(
+                $"CraneCAN ZIP package должен содержать ровно один {CraneProjectPackageHashManifestCodec.EntryName} в корне архива. " +
+                "Legacy package без SHA-256 manifest нужно заново экспортировать текущей версией CraneCAN.");
         }
 
         return new ArchiveScan(files, totalUncompressedBytes);
@@ -254,18 +295,26 @@ public static class CraneProjectPackageImporter
 
     private static IReadOnlyDictionary<string, CraneProjectResourceKind> BuildExpectedEntries(
         CraneProject project,
-        string manifestEntryName)
+        string projectEntryName)
     {
         CraneProjectCodec.Validate(project);
         var expected = new Dictionary<string, CraneProjectResourceKind>(
             StringComparer.OrdinalIgnoreCase)
         {
-            [NormalizeSafeEntryName(manifestEntryName)] = CraneProjectResourceKind.Other
+            [NormalizeSafeEntryName(projectEntryName)] = CraneProjectResourceKind.Other
         };
 
         foreach (var resource in project.Resources)
         {
             var entryName = NormalizeSafeEntryName(resource.RelativePath);
+            if (string.Equals(
+                    entryName,
+                    CraneProjectPackageHashManifestCodec.EntryName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Project resource использует зарезервированное имя {CraneProjectPackageHashManifestCodec.EntryName}.");
+            }
             if (expected.ContainsKey(entryName))
             {
                 throw new InvalidDataException(
@@ -278,15 +327,82 @@ public static class CraneProjectPackageImporter
         return expected;
     }
 
-    private static void ValidateArchiveMatchesManifest(
+    private static IReadOnlyDictionary<string, ProjectPackageFileFingerprint> BuildHashExpectations(
+        CraneProjectPackageHashManifest manifest)
+    {
+        CraneProjectPackageHashManifestCodec.Validate(manifest);
+        var expected = new Dictionary<string, ProjectPackageFileFingerprint>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in manifest.Files)
+        {
+            var normalized = CraneProjectPackageHashManifestCodec.NormalizeFingerprint(file);
+            var safeName = NormalizeSafeEntryName(normalized.EntryName);
+            if (!string.Equals(safeName, normalized.EntryName, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Package SHA-256 manifest содержит неканонический path: {normalized.EntryName}.");
+            }
+            if (!expected.TryAdd(safeName, normalized))
+            {
+                throw new InvalidDataException(
+                    $"Package SHA-256 manifest повторяет path: {safeName}.");
+            }
+        }
+
+        return expected;
+    }
+
+    private static void ValidateHashManifestMatchesProject(
+        CraneProjectPackageHashManifest hashManifest,
+        CraneProject project,
+        IReadOnlyDictionary<string, CraneProjectResourceKind> expectedEntries,
+        IReadOnlyDictionary<string, ProjectPackageFileFingerprint> hashExpectations)
+    {
+        if (hashManifest.ProjectId != project.ProjectId)
+        {
+            throw new InvalidDataException(
+                "Project ID в package SHA-256 manifest не совпадает с .canproject.");
+        }
+
+        var projectFileName = expectedEntries.Keys.Single(name =>
+            name.EndsWith(".canproject", StringComparison.OrdinalIgnoreCase));
+        if (!string.Equals(
+                hashManifest.ProjectFileName,
+                projectFileName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                "Имя .canproject в package SHA-256 manifest не совпадает с архивом.");
+        }
+
+        var missingHashes = expectedEntries.Keys
+            .Where(name => !hashExpectations.ContainsKey(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var extraHashes = hashExpectations.Keys
+            .Where(name => !expectedEntries.ContainsKey(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (missingHashes.Length > 0 || extraHashes.Length > 0)
+        {
+            throw new InvalidDataException(
+                "Package SHA-256 manifest не соответствует resources .canproject. " +
+                $"Missing hash: {string.Join(", ", missingHashes)}. " +
+                $"Extra hash: {string.Join(", ", extraHashes)}.");
+        }
+    }
+
+    private static void ValidateArchiveMatchesProject(
         IReadOnlyList<ScannedEntry> files,
         IReadOnlyDictionary<string, CraneProjectResourceKind> expected)
     {
-        var actual = files
+        var actualPayload = files
+            .Where(file => !file.IsHashManifest)
             .Select(file => file.NormalizedName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var unexpected = actual
+        var unexpected = actualPayload
             .Where(name => !expected.ContainsKey(name))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -299,7 +415,7 @@ public static class CraneProjectPackageImporter
         }
 
         var missing = expected.Keys
-            .Where(name => !actual.Contains(name))
+            .Where(name => !actualPayload.Contains(name))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (missing.Length > 0)
@@ -308,6 +424,27 @@ public static class CraneProjectPackageImporter
                 "ZIP package не содержит зарегистрированные project resources: " +
                 string.Join(", ", missing) +
                 ".");
+        }
+    }
+
+    private static void VerifyFingerprint(
+        ProjectPackageFileFingerprint actual,
+        IReadOnlyDictionary<string, ProjectPackageFileFingerprint> expected)
+    {
+        if (!expected.TryGetValue(actual.EntryName, out var recorded))
+        {
+            throw new InvalidDataException(
+                $"Package SHA-256 manifest не содержит fingerprint: {actual.EntryName}.");
+        }
+        if (actual.Length != recorded.Length)
+        {
+            throw new InvalidDataException(
+                $"Размер package entry не совпадает с SHA-256 manifest: {actual.EntryName}.");
+        }
+        if (!string.Equals(actual.Sha256, recorded.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"SHA-256 mismatch: package entry был изменён после экспорта: {actual.EntryName}.");
         }
     }
 
@@ -459,8 +596,8 @@ public static class CraneProjectPackageImporter
         {
             if (segment is "." or ".." ||
                 segment.IndexOf('\0') >= 0 ||
-                segment.EndsWith(' ') ||
-                segment.EndsWith('.') ||
+                segment.EndsWith(" ", StringComparison.Ordinal) ||
+                segment.EndsWith(".", StringComparison.Ordinal) ||
                 segment.Any(character =>
                     character < 32 ||
                     character is '<' or '>' or ':' or '"' or '|' or '?' or '*'))
@@ -502,11 +639,18 @@ public static class CraneProjectPackageImporter
         return false;
     }
 
-    private static bool IsRootManifest(string normalizedName) =>
+    private static bool IsRootProjectManifest(string normalizedName) =>
         !normalizedName.Contains('/') &&
         string.Equals(
             Path.GetExtension(normalizedName),
             ".canproject",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsHashManifest(string normalizedName) =>
+        !normalizedName.Contains('/') &&
+        string.Equals(
+            normalizedName,
+            CraneProjectPackageHashManifestCodec.EntryName,
             StringComparison.OrdinalIgnoreCase);
 
     private static bool IsUnixSymlink(ZipArchiveEntry entry)
@@ -590,7 +734,8 @@ public static class CraneProjectPackageImporter
     private sealed record ScannedEntry(
         ZipArchiveEntry Entry,
         string NormalizedName,
-        bool IsManifest);
+        bool IsProjectManifest,
+        bool IsHashManifest);
 
     private sealed record ArchiveScan(
         IReadOnlyList<ScannedEntry> Files,

@@ -8,6 +8,8 @@ internal static class ProjectPackageImportTests
     public static void Run()
     {
         TestVerifiedImportRoundTrip();
+        TestPayloadHashMismatchRejected();
+        TestLegacyPackageWithoutHashManifestRejected();
         TestTraversalEntryRejected();
         TestUnexpectedAndMissingEntriesRejected();
         TestCaseInsensitiveDuplicateRejected();
@@ -41,15 +43,17 @@ internal static class ProjectPackageImportTests
                 imported.ProjectId == setup.Project.ProjectId &&
                 result.Project.ProjectId == setup.Project.ProjectId &&
                 result.ResourceCount == setup.Project.Resources.Count &&
-                result.FileCount == setup.Project.Resources.Count + 1 &&
+                result.FileCount == setup.Project.Resources.Count + 2 &&
                 result.PackageIntegrity.IsHealthy &&
                 result.ArchiveSha256 == expectedArchiveSha &&
-                result.ArchiveBytes == new FileInfo(setup.ArchivePath).Length,
+                result.ArchiveBytes == new FileInfo(setup.ArchivePath).Length &&
+                IsSha256(result.PackageManifestSha256),
                 "Verified project package import metadata is incorrect.");
 
             var expectedFiles = setup.Project.Resources
                 .Select(resource => resource.RelativePath.Replace('\\', '/'))
                 .Append(Path.GetFileName(setup.ProjectPath))
+                .Append(CraneProjectPackageHashManifestCodec.EntryName)
                 .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             var importedFiles = Directory.EnumerateFiles(
@@ -61,7 +65,7 @@ internal static class ProjectPackageImportTests
                 .ToArray();
             Check(
                 importedFiles.SequenceEqual(expectedFiles, StringComparer.OrdinalIgnoreCase),
-                "Importer did not publish exactly the manifest and registered resources.");
+                "Importer did not publish exactly the SHA-256 manifest, .canproject and registered resources.");
 
             foreach (var resource in setup.Project.Resources)
             {
@@ -78,13 +82,101 @@ internal static class ProjectPackageImportTests
                     $"Imported resource bytes changed: {resource.RelativePath}.");
             }
 
+            var importedHashManifestPath = Path.Combine(
+                destination,
+                CraneProjectPackageHashManifestCodec.EntryName);
+            var importedHashManifest = CraneProjectPackageHashManifestCodec.Load(
+                importedHashManifestPath);
+            var actualHashManifestSha = Convert.ToHexString(
+                    SHA256.HashData(File.ReadAllBytes(importedHashManifestPath)))
+                .ToLowerInvariant();
             Check(
+                importedHashManifest.ProjectId == setup.Project.ProjectId &&
+                importedHashManifest.Files.Count == setup.Project.Resources.Count + 1 &&
+                result.PackageManifestSha256 == actualHashManifestSha &&
                 result.Files.Count == result.FileCount &&
-                result.Files.All(file =>
-                    file.Sha256.Length == 64 &&
-                    file.Sha256.All(character =>
-                        char.IsDigit(character) || character is >= 'a' and <= 'f')),
-                "Importer did not retain per-entry SHA-256 fingerprints.");
+                result.Files.All(file => IsSha256(file.Sha256)),
+                "Importer did not retain or verify the internal SHA-256 package manifest.");
+        }
+        finally
+        {
+            DeleteDirectory(source);
+            DeleteDirectory(output);
+        }
+    }
+
+    private static void TestPayloadHashMismatchRejected()
+    {
+        var source = TempDirectory("cranecan-import-tamper-source");
+        var output = TempDirectory("cranecan-import-tamper-output");
+        try
+        {
+            var setup = CreatePackage(source, Path.Combine(output, "tampered.zip"));
+            var traceRelative = setup.Project.Resources.Single(resource =>
+                resource.Kind == CraneProjectResourceKind.Trace).RelativePath.Replace('\\', '/');
+
+            using (var archive = ZipFile.Open(setup.ArchivePath, ZipArchiveMode.Update))
+            {
+                var original = archive.Entries.Single(entry => string.Equals(
+                    entry.FullName.Replace('\\', '/'),
+                    traceRelative,
+                    StringComparison.OrdinalIgnoreCase));
+                original.Delete();
+                var changed = archive.CreateEntry(traceRelative);
+                using var writer = new StreamWriter(changed.Open());
+                writer.Write("payload changed after export");
+            }
+
+            var destination = Path.Combine(output, "tampered-import");
+            var exception = CaptureException(() =>
+                CraneProjectPackageImporter.ImportZipAsync(
+                        setup.ArchivePath,
+                        destination)
+                    .GetAwaiter()
+                    .GetResult());
+
+            Check(
+                exception is InvalidDataException &&
+                exception.Message.Contains("SHA-256 mismatch", StringComparison.OrdinalIgnoreCase) &&
+                !Directory.Exists(destination),
+                "Modified payload was not rejected by the internal SHA-256 manifest.");
+        }
+        finally
+        {
+            DeleteDirectory(source);
+            DeleteDirectory(output);
+        }
+    }
+
+    private static void TestLegacyPackageWithoutHashManifestRejected()
+    {
+        var source = TempDirectory("cranecan-import-legacy-source");
+        var output = TempDirectory("cranecan-import-legacy-output");
+        try
+        {
+            var setup = CreatePackage(source, Path.Combine(output, "legacy.zip"));
+            using (var archive = ZipFile.Open(setup.ArchivePath, ZipArchiveMode.Update))
+            {
+                var manifest = archive.Entries.Single(entry => string.Equals(
+                    entry.FullName.Replace('\\', '/'),
+                    CraneProjectPackageHashManifestCodec.EntryName,
+                    StringComparison.OrdinalIgnoreCase));
+                manifest.Delete();
+            }
+
+            var destination = Path.Combine(output, "legacy-import");
+            var exception = CaptureException(() =>
+                CraneProjectPackageImporter.ImportZipAsync(
+                        setup.ArchivePath,
+                        destination)
+                    .GetAwaiter()
+                    .GetResult());
+
+            Check(
+                exception is InvalidDataException &&
+                exception.Message.Contains("SHA-256 manifest", StringComparison.OrdinalIgnoreCase) &&
+                !Directory.Exists(destination),
+                "Package without internal SHA-256 manifest was not rejected.");
         }
         finally
         {
@@ -364,6 +456,10 @@ internal static class ProjectPackageImportTests
             return exception;
         }
     }
+
+    private static bool IsSha256(string value) =>
+        value.Length == 64 &&
+        value.All(character => char.IsDigit(character) || character is >= 'a' and <= 'f');
 
     private static string TempDirectory(string prefix)
     {

@@ -87,15 +87,13 @@ internal static class ProjectPackageTests
                 .ToLowerInvariant();
             Check(
                 result.ResourceCount == 3 &&
-                result.FileCount == 4 &&
+                result.FileCount == 5 &&
                 result.SourceIntegrity.IsHealthy &&
                 result.PackageIntegrity.IsHealthy &&
                 result.ArchiveBytes == new FileInfo(archivePath).Length &&
                 result.Sha256 == actualArchiveSha256 &&
-                result.Sha256.Length == 64 &&
-                result.Sha256.All(character =>
-                    char.IsDigit(character) ||
-                    character is >= 'a' and <= 'f'),
+                IsSha256(result.Sha256) &&
+                IsSha256(result.PackageManifestSha256),
                 "Portable ZIP package result metadata is incorrect.");
 
             using (var archive = ZipFile.OpenRead(archivePath))
@@ -108,6 +106,7 @@ internal static class ProjectPackageTests
 
                 var expected = new[]
                 {
+                    CraneProjectPackageHashManifestCodec.EntryName,
                     "profiles/JK1200A.craneprofile",
                     "reports/signature.md",
                     "SOOSAN_JK1200A.canproject",
@@ -119,7 +118,7 @@ internal static class ProjectPackageTests
                     entries.SequenceEqual(
                         expected,
                         StringComparer.OrdinalIgnoreCase),
-                    "ZIP package did not contain exactly the registered resources plus .canproject.");
+                    "ZIP package did not contain exactly registered resources, .canproject and SHA-256 manifest.");
                 Check(
                     !entries.Any(entry => entry.Contains(
                         "private-note",
@@ -137,12 +136,18 @@ internal static class ProjectPackageTests
                     extractedProject)
                 .GetAwaiter()
                 .GetResult();
+            var hashManifest = CraneProjectPackageHashManifestCodec.Load(Path.Combine(
+                extracted,
+                CraneProjectPackageHashManifestCodec.EntryName));
 
             Check(
                 extractedProject.ProjectId == project.ProjectId &&
                 extractedProject.Resources.Count == project.Resources.Count &&
-                extractedIntegrity.IsHealthy,
-                "Extracted project did not preserve IDs/resources or failed Project Integrity.");
+                extractedIntegrity.IsHealthy &&
+                hashManifest.ProjectId == project.ProjectId &&
+                hashManifest.ProjectFileName == "SOOSAN_JK1200A.canproject" &&
+                hashManifest.Files.Count == 4,
+                "Extracted project or package SHA-256 manifest is inconsistent.");
 
             Check(
                 sourceProjectBytes.SequenceEqual(File.ReadAllBytes(projectPath)) &&
@@ -326,6 +331,10 @@ internal static class ProjectPackageTests
             DeleteDirectory(root);
         }
     }
+
+    private static bool IsSha256(string value) =>
+        value.Length == 64 &&
+        value.All(character => char.IsDigit(character) || character is >= 'a' and <= 'f');
 
     private static string TempDirectory(string prefix)
     {

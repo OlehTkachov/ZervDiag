@@ -22,7 +22,7 @@ public partial class MainWindow
         {
             Content = "Экспорт ZIP…",
             ToolTip =
-                "Создать проверенный переносимый ZIP package из *.canproject и только зарегистрированных resources.",
+                "Создать проверенный переносимый ZIP package из *.canproject и только зарегистрированных resources, с внутренним SHA-256 manifest.",
             Padding = new Thickness(12, 5, 12, 5),
             Margin = new Thickness(4, 0, 0, 0)
         };
@@ -88,7 +88,7 @@ public partial class MainWindow
 
         try
         {
-            SetBusy(true, "Проверка и упаковка CraneCAN project…");
+            SetBusy(true, "Проверка, SHA-256 manifest и упаковка CraneCAN project…");
             var result = await CraneProjectPackageExporter.ExportZipAsync(
                 _craneProjectPath,
                 _craneProject,
@@ -106,9 +106,12 @@ public partial class MainWindow
                 $"Файлов в ZIP: {result.FileCount}\n" +
                 $"Исходный объём: {FormatPackageBytes(result.UncompressedBytes)}\n" +
                 $"ZIP: {FormatPackageBytes(result.ArchiveBytes)}\n" +
-                $"SHA-256:\n{result.Sha256}\n\n" +
+                $"SHA-256 архива:\n{result.Sha256}\n\n" +
+                $"SHA-256 внутреннего package manifest:\n{result.PackageManifestSha256}\n\n" +
+                "Внутренний manifest фиксирует SHA-256 и размер каждого .canproject/resource. " +
                 "Проверены source project, staged copy и содержимое ZIP. " +
-                "Исходные *.canproject/resources не изменялись.",
+                "Исходные *.canproject/resources не изменялись.\n\n" +
+                "SHA-256 manifest контролирует целостность, но не является цифровой подписью и не доказывает авторство package.",
                 "CraneCAN package готов",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);

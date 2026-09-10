@@ -17,6 +17,7 @@ public sealed record ProjectPackageExportResult(
     long UncompressedBytes,
     long ArchiveBytes,
     string Sha256,
+    string PackageManifestSha256,
     ProjectIntegrityReport SourceIntegrity,
     ProjectIntegrityReport PackageIntegrity);
 
@@ -35,9 +36,10 @@ public sealed class ProjectPackageIntegrityException : InvalidOperationException
 
 /// <summary>
 /// Creates a self-contained ZIP package from a saved CraneCAN project. Only the
-/// .canproject manifest and registered project resources are included. Source
-/// files are read-only; the exporter verifies source integrity, staged-copy
-/// integrity and every ZIP entry before publishing the archive.
+/// .canproject manifest, registered project resources and the internal SHA-256
+/// package manifest are included. Source files are read-only; the exporter
+/// verifies source integrity, staged-copy integrity and every ZIP entry before
+/// publishing the archive.
 /// </summary>
 public static class CraneProjectPackageExporter
 {
@@ -125,6 +127,14 @@ public static class CraneProjectPackageExporter
                     throw new InvalidOperationException(
                         "Сам .canproject не должен быть зарегистрирован как обычный resource.");
                 }
+                if (string.Equals(
+                        entryName,
+                        CraneProjectPackageHashManifestCodec.EntryName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Имя {CraneProjectPackageHashManifestCodec.EntryName} зарезервировано для внутреннего SHA-256 manifest package.");
+                }
 
                 var destinationPath = Path.Combine(
                     stagingRoot,
@@ -156,6 +166,22 @@ public static class CraneProjectPackageExporter
                 packageIntegrity,
                 "Экспорт остановлен: staged package не прошёл повторную проверку целостности.");
 
+            var hashManifest = CraneProjectPackageHashManifestCodec.Create(
+                projectFileName,
+                stagedProject.ProjectId,
+                expected.Values);
+            var hashManifestPath = Path.Combine(
+                stagingRoot,
+                CraneProjectPackageHashManifestCodec.EntryName);
+            CraneProjectPackageHashManifestCodec.Save(
+                hashManifestPath,
+                hashManifest);
+            var hashManifestFingerprint = await HashFileAsync(
+                    hashManifestPath,
+                    CraneProjectPackageHashManifestCodec.EntryName,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             cancellationToken.ThrowIfCancellationRequested();
             if (File.Exists(tempArchivePath))
                 File.Delete(tempArchivePath);
@@ -170,6 +196,7 @@ public static class CraneProjectPackageExporter
             await VerifyArchiveAsync(
                     tempArchivePath,
                     expected,
+                    hashManifestFingerprint,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -190,10 +217,11 @@ public static class CraneProjectPackageExporter
                 finalArchivePath,
                 projectFileName,
                 project.Resources.Count,
-                expected.Count,
-                expected.Values.Sum(item => item.Length),
+                expected.Count + 1,
+                expected.Values.Sum(item => item.Length) + hashManifestFingerprint.Length,
                 archiveBytes,
                 archiveFingerprint.Sha256,
+                hashManifestFingerprint.Sha256,
                 sourceIntegrity,
                 packageIntegrity);
         }
@@ -318,6 +346,7 @@ public static class CraneProjectPackageExporter
     private static async Task VerifyArchiveAsync(
         string archivePath,
         IReadOnlyDictionary<string, ProjectPackageFileFingerprint> expected,
+        ProjectPackageFileFingerprint hashManifestFingerprint,
         CancellationToken cancellationToken)
     {
         using var archive = ZipFile.OpenRead(archivePath);
@@ -336,7 +365,15 @@ public static class CraneProjectPackageExporter
                     $"ZIP package содержит повторяющийся entry: {entryName}.");
             }
 
-            if (!expected.TryGetValue(entryName, out var fingerprint))
+            ProjectPackageFileFingerprint fingerprint;
+            if (string.Equals(
+                    entryName,
+                    hashManifestFingerprint.EntryName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                fingerprint = hashManifestFingerprint;
+            }
+            else if (!expected.TryGetValue(entryName, out fingerprint!))
             {
                 throw new InvalidDataException(
                     $"ZIP package содержит незарегистрированный файл: {entryName}.");
@@ -364,6 +401,7 @@ public static class CraneProjectPackageExporter
         }
 
         var missing = expected.Keys
+            .Append(hashManifestFingerprint.EntryName)
             .Where(entryName => !seen.Contains(entryName))
             .OrderBy(entryName => entryName, StringComparer.OrdinalIgnoreCase)
             .ToArray();

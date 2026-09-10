@@ -31,7 +31,7 @@ public partial class MainWindow
         {
             Content = "Импорт ZIP…",
             ToolTip =
-                "Проверить переносимый CraneCAN ZIP package, безопасно распаковать в новую папку и открыть *.canproject.",
+                "Проверить переносимый CraneCAN ZIP package, внутренний SHA-256 manifest, безопасно распаковать в новую папку и открыть *.canproject.",
             Padding = new Thickness(12, 5, 12, 5),
             Margin = new Thickness(4, 0, 0, 0)
         };
@@ -101,7 +101,7 @@ public partial class MainWindow
 
         try
         {
-            SetBusy(true, "Проверка и безопасный импорт CraneCAN ZIP package…");
+            SetBusy(true, "Проверка SHA-256 manifest и безопасный импорт CraneCAN ZIP package…");
             var result = await CraneProjectPackageImporter.ImportZipAsync(
                 packageDialog.FileName,
                 destinationDirectory);
@@ -122,9 +122,11 @@ public partial class MainWindow
                 $"Распаковано: {FormatPackageBytes(result.UncompressedBytes)}\n" +
                 $"ZIP: {FormatPackageBytes(result.ArchiveBytes)}\n" +
                 $"SHA-256 архива:\n{result.ArchiveSha256}\n\n" +
+                $"SHA-256 внутреннего package manifest:\n{result.PackageManifestSha256}\n\n" +
                 "Проверены структура архива, безопасные пути, состав относительно .canproject, " +
-                "SHA-256 каждого распакованного entry и Project Integrity. " +
-                "Существующие файлы не перезаписывались.",
+                "записанный при экспорте SHA-256 и размер каждого payload entry, а затем Project Integrity. " +
+                "Существующие файлы не перезаписывались.\n\n" +
+                "Внутренний SHA-256 manifest подтверждает целостность package, но не является цифровой подписью автора.",
                 "CraneCAN package импортирован",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
