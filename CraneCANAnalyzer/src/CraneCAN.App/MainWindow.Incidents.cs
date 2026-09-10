@@ -183,7 +183,15 @@ public partial class MainWindow
             Padding = new Thickness(14, 6, 14, 6),
             Margin = new Thickness(4),
             ToolTip = "Текущий incident = ЭТАЛОН / GOOD / BEFORE; выбранный второй = СРАВНЕНИЕ / FAULT / AFTER."
-        };        var openCapture = new Button
+        };
+        var signature = new Button
+        {
+            Content = "Повторяемость 3+ incident…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            ToolTip = "Найти CAN-шаги, повторяющиеся в нескольких независимых incident относительно marker."
+        };
+        var openCapture = new Button
         {
             Content = "Открыть capture.trc в анализаторе",
             Padding = new Thickness(14, 6, 14, 6),
@@ -202,6 +210,7 @@ public partial class MainWindow
         };
         buttons.Children.Add(analyze);
         buttons.Children.Add(compareIncident);
+        buttons.Children.Add(signature);
         buttons.Children.Add(openCapture);
         buttons.Children.Add(close);
 
@@ -240,7 +249,14 @@ public partial class MainWindow
             compareIncident.IsEnabled = false;
             try { await CompareIncidentWithAnotherAsync(package, window); }
             finally { compareIncident.IsEnabled = true; }
-        };        openCapture.Click += async (_, _) =>
+        };
+        signature.Click += async (_, _) =>
+        {
+            signature.IsEnabled = false;
+            try { await AnalyzeIncidentSignatureAsync(package, window); }
+            finally { signature.IsEnabled = true; }
+        };
+        openCapture.Click += async (_, _) =>
         {
             openCapture.IsEnabled = false;
             if (await OpenIncidentCaptureAsync(package)) window.Close();
