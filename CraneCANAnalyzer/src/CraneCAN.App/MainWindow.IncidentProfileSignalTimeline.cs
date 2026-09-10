@@ -21,8 +21,7 @@ public partial class MainWindow
             .Concat(_machineProfile.ExperimentalSignals)
             .Where(signal =>
                 signal.Confidence != SignalKnowledgeState.Rejected &&
-                signal.CanId == step.Id &&
-                signal.IsExtended == step.IsExtended &&
+                IncidentProfileSignalMatchesStepIdentifier(signal, step) &&
                 IncidentProfileSignalOverlapsStep(signal, step))
             .GroupBy(signal => signal.SignalId)
             .Select(group => group.First())
@@ -35,7 +34,8 @@ public partial class MainWindow
         {
             MessageBox.Show(
                 "В текущем Machine Profile нет декодируемого сигнала, поле которого пересекает выбранный DATA[n]. " +
-                "Сначала используйте «Добавить DATA-шаг в профиль…» либо Cross-Incident → Machine Profile.",
+                "Для J1939 поиск выполняется по PGN и не требует совпадения Source Address. " +
+                "Сначала используйте «Добавить DATA-шаг в профиль…» либо Cross-Incident → Machine Profile / Import DBC.",
                 "Profile signal timeline",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -55,6 +55,31 @@ public partial class MainWindow
             step,
             signal,
             owner);
+    }
+
+    private static bool IncidentProfileSignalMatchesStepIdentifier(
+        MachineSignal signal,
+        IncidentEventChainStep step)
+    {
+        if (signal.IsExtended != step.IsExtended)
+            return false;
+
+        if (J1939TraceSignalAnalyzer.IsJ1939Signal(signal))
+        {
+            try
+            {
+                return J1939SignalDecoder.MatchesIdentifier(
+                    signal,
+                    step.Id,
+                    step.IsExtended);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return signal.CanId == step.Id;
     }
 
     private static bool IncidentProfileSignalOverlapsStep(
@@ -111,7 +136,7 @@ public partial class MainWindow
         var info = new TextBlock
         {
             Text =
-                "Несколько сигналов Machine Profile пересекают выбранный DATA[n]. Выберите, какой декодировать. ByteOrder отображается явно.",
+                "Несколько сигналов Machine Profile пересекают выбранный DATA[n]. Выберите, какой декодировать. Для J1939 PGN/SPN и ByteOrder отображаются явно.",
             TextWrapping = TextWrapping.Wrap
         };
 
@@ -152,9 +177,9 @@ public partial class MainWindow
         {
             Owner = owner,
             Title = "CraneCAN — выбор Profile signal",
-            Width = 650,
+            Width = 700,
             Height = 220,
-            MinWidth = 560,
+            MinWidth = 580,
             MinHeight = 200,
             WindowStartupLocation =
                 WindowStartupLocation.CenterOwner,
@@ -185,13 +210,24 @@ public partial class MainWindow
         Window owner)
     {
         IncidentProfileSignalTimelineResult result;
+        J1939IncidentProfileTimelineResult? j1939 = null;
         try
         {
-            result =
-                IncidentProfileSignalTimelineAnalyzer.Analyze(
+            if (J1939TraceSignalAnalyzer.IsJ1939Signal(signal))
+            {
+                j1939 = J1939IncidentAnalyzer.AnalyzeProfileTimeline(
                     package.Incident,
                     step,
                     signal);
+                result = j1939.Timeline;
+            }
+            else
+            {
+                result = IncidentProfileSignalTimelineAnalyzer.Analyze(
+                    package.Incident,
+                    step,
+                    signal);
+            }
         }
         catch (Exception exception)
         {
@@ -211,6 +247,14 @@ public partial class MainWindow
         var unit = string.IsNullOrWhiteSpace(signal.Unit)
             ? string.Empty
             : " " + signal.Unit.Trim();
+        var protocolDetails = j1939 is null
+            ? string.Empty
+            : "\nJ1939: " +
+              $"PGN 0x{j1939.Pgn:X5}" +
+              (j1939.Spn.HasValue ? $" · SPN {j1939.Spn.Value}" : string.Empty) +
+              " · observed SA " +
+              string.Join(", ", j1939.SourceAddresses.Select(value => $"0x{value:X2}")) +
+              ". Matching выполняется по PGN; PDU1 Destination Address фиксирован.";
 
         var summary = new TextBlock
         {
@@ -218,11 +262,13 @@ public partial class MainWindow
             Margin = new Thickness(0, 0, 0, 10),
             Text =
                 $"Signal: {signal.Name} · {signal.Confidence.ToString().ToUpperInvariant()}\n" +
-                $"{(signal.IsExtended ? "Extended" : "Standard")} ID 0x{signal.CanId.ToString(signal.IsExtended ? "X8" : "X3", CultureInfo.InvariantCulture)} · " +
+                $"Observed {(step.IsExtended ? "Extended" : "Standard")} ID 0x{step.Id.ToString(step.IsExtended ? "X8" : "X3", CultureInfo.InvariantCulture)}; " +
+                $"Profile canonical ID 0x{signal.CanId.ToString(signal.IsExtended ? "X8" : "X3", CultureInfo.InvariantCulture)} · " +
                 $"field DATA[{signal.StartByte}] bit {signal.StartBit}, {signal.BitLength} bit, {signal.ByteOrder}, " +
                 $"{(signal.IsSigned ? "signed" : "unsigned")} · scale {FormatIncidentProfileNumber(signal.Scale)} · " +
-                $"offset {FormatIncidentProfileNumber(signal.Offset)}{unit}.\n" +
-                $"Кадров ID: {result.MatchingFrameCount:N0}; декодировано: {result.SourceFrameCount:N0}; " +
+                $"offset {FormatIncidentProfileNumber(signal.Offset)}{unit}." +
+                protocolDetails + "\n" +
+                $"Кадров: {result.MatchingFrameCount:N0}; декодировано: {result.SourceFrameCount:N0}; " +
                 $"короткий DLC: {result.ShortFrameCount:N0}; диапазон: " +
                 $"{FormatIncidentProfileNumber(result.MinimumEngineeringValue)} … " +
                 $"{FormatIncidentProfileNumber(result.MaximumEngineeringValue)}{unit}.\n" +
@@ -230,7 +276,7 @@ public partial class MainWindow
                 warnings + "\n" +
                 "Engineering value вычислено строго по текущему Machine Profile. " +
                 "BigEndian использует явно определённую DBC/Motorola sawtooth convention. " +
-                "График не доказывает физическое назначение сигнала; raw DATA-график остаётся независимым источником evidence."
+                "PGN/SPN/engineering-аннотация не доказывает физическое назначение сигнала; raw DATA-график остаётся независимым evidence."
         };
 
         var canvas = new Canvas
@@ -293,7 +339,7 @@ public partial class MainWindow
             Owner = owner,
             Title = "CraneCAN — Profile signal timeline",
             Width = 1080,
-            Height = 650,
+            Height = 680,
             MinWidth = 760,
             MinHeight = 500,
             WindowStartupLocation =
@@ -464,9 +510,16 @@ public partial class MainWindow
         public string DisplayText =>
             $"{(string.IsNullOrWhiteSpace(Signal.Name) ? "(без имени)" : Signal.Name)} · " +
             $"{Signal.Confidence.ToString().ToUpperInvariant()} · " +
+            J1939Text +
             $"DATA[{Signal.StartByte}] bit {Signal.StartBit}, {Signal.BitLength} bit · " +
             $"{Signal.ByteOrder} · " +
             $"{(Signal.IsSigned ? "signed" : "unsigned")} · " +
             $"scale {FormatIncidentProfileNumber(Signal.Scale)}, offset {FormatIncidentProfileNumber(Signal.Offset)}";
+
+        private string J1939Text => J1939TraceSignalAnalyzer.IsJ1939Signal(Signal)
+            ? $"PGN 0x{Signal.J1939Pgn!.Value:X5}" +
+              (Signal.J1939Spn.HasValue ? $" / SPN {Signal.J1939Spn.Value}" : string.Empty) +
+              " · "
+            : string.Empty;
     }
 }
