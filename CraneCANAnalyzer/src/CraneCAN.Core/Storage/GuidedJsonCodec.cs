@@ -32,13 +32,19 @@ public static class GuidedJsonCodec
         CancellationToken cancellationToken = default) =>
         SaveAsync(path, experiment, cancellationToken);
 
+    public static Task<GuidedExperiment> ReadExperimentAsync(
+        string path,
+        CancellationToken cancellationToken = default) =>
+        LoadAsync<GuidedExperiment>(path, cancellationToken);
+
     public static async Task<GuidedExperiment> LoadExperimentAsync(
         string path,
         CancellationToken cancellationToken = default)
     {
-        var experiment = await LoadAsync<GuidedExperiment>(path, cancellationToken)
+        var experiment = await ReadExperimentAsync(path, cancellationToken)
             .ConfigureAwait(false);
         ProjectTraceDependencyResolver.SetExperimentContext(path);
+        ProjectTraceBindingResolver.SetExperimentContext(path);
         return experiment;
     }
 
