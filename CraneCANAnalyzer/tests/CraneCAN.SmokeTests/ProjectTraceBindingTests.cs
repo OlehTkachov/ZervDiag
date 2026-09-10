@@ -303,23 +303,27 @@ internal static class ProjectTraceBindingTests
                 ProjectTraceBindingService.ValidateBindings(project).Count == 0,
                 "Setting the same binding twice created duplicates or invalid state.");
 
-            var stale = CraneProjectCodec.RemoveResource(
+            var withoutTrace = CraneProjectCodec.RemoveResource(
                 project,
                 traceUpdate.Resource.ResourceId);
             Check(
-                ProjectTraceBindingService.ValidateBindings(stale).Count > 0,
-                "Stale binding was not detected after its Trace resource was removed.");
+                withoutTrace.TraceBindings.Count == 0 &&
+                ProjectTraceBindingService.ValidateBindings(withoutTrace).Count == 0,
+                "Removing a Trace resource did not automatically remove dependent bindings.");
 
-            var cleaned = ProjectTraceBindingService.RemoveBindingsForResource(
+            var rebound = ProjectTraceBindingService.SetBinding(
                 project,
+                experimentUpdate.Resource.ResourceId,
+                1,
+                ProjectTraceBindingRole.Action,
                 traceUpdate.Resource.ResourceId);
-            cleaned = CraneProjectCodec.RemoveResource(
-                cleaned,
-                traceUpdate.Resource.ResourceId);
+            var withoutExperiment = CraneProjectCodec.RemoveResource(
+                rebound,
+                experimentUpdate.Resource.ResourceId);
             Check(
-                cleaned.TraceBindings.Count == 0 &&
-                ProjectTraceBindingService.ValidateBindings(cleaned).Count == 0,
-                "Binding cleanup did not remove references to a removed resource.");
+                withoutExperiment.TraceBindings.Count == 0 &&
+                ProjectTraceBindingService.ValidateBindings(withoutExperiment).Count == 0,
+                "Removing a GuidedExperiment resource did not automatically remove its bindings.");
         }
         finally
         {
