@@ -50,6 +50,7 @@ public partial class MainWindow
                     : panel.Children.Count;
         panel.Children.Insert(insertIndex, button);
         _projectIntegrityButton = button;
+        EnsureProjectPackageButton();
     }
 
     private async void ProjectIntegrityButton_Click(
