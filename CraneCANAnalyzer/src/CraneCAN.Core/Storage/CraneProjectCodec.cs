@@ -181,6 +181,41 @@ public static class CraneProjectCodec
         };
     }
 
+    public static CraneProject Save(
+        string path,
+        CraneProject project)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(project);
+
+        var normalized = NormalizeForSave(project);
+        var fullPath = PrepareProjectPath(path);
+        using var stream = new FileStream(
+            fullPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.Read);
+        JsonSerializer.Serialize(stream, normalized, Options);
+        return normalized;
+    }
+
+    public static CraneProject Load(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var fullPath = Path.GetFullPath(path);
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException("Файл CraneCAN project не найден.", fullPath);
+
+        using var stream = new FileStream(
+            fullPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read);
+        var project = JsonSerializer.Deserialize<CraneProject>(stream, Options)
+            ?? throw new InvalidDataException("Пустой или некорректный файл .canproject.");
+        return ValidateLoaded(fullPath, project);
+    }
+
     public static async Task<CraneProject> SaveAsync(
         string path,
         CraneProject project,
@@ -189,18 +224,8 @@ public static class CraneProjectCodec
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(project);
 
-        var normalized = project with
-        {
-            ProgramVersion = "0.7.0",
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-        Validate(normalized);
-
-        var fullPath = Path.GetFullPath(path);
-        var directory = Path.GetDirectoryName(fullPath)
-            ?? throw new InvalidOperationException("Не удалось определить каталог .canproject.");
-        Directory.CreateDirectory(directory);
-
+        var normalized = NormalizeForSave(project);
+        var fullPath = PrepareProjectPath(path);
         await using var stream = new FileStream(
             fullPath,
             FileMode.Create,
@@ -234,12 +259,7 @@ public static class CraneProjectCodec
                 cancellationToken)
             .ConfigureAwait(false)
             ?? throw new InvalidDataException("Пустой или некорректный файл .canproject.");
-
-        Validate(project);
-        foreach (var resource in project.Resources)
-            _ = ResolveResourcePath(fullPath, resource);
-
-        return project;
+        return ValidateLoaded(fullPath, project);
     }
 
     public static void Validate(CraneProject project)
@@ -284,6 +304,36 @@ public static class CraneProjectCodec
             CraneProjectResourceKind.GuidedExperiment,
             project.Resources,
             "activeExperimentResourceId");
+    }
+
+    private static CraneProject NormalizeForSave(CraneProject project)
+    {
+        var normalized = project with
+        {
+            ProgramVersion = "0.7.0",
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        Validate(normalized);
+        return normalized;
+    }
+
+    private static string PrepareProjectPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath)
+            ?? throw new InvalidOperationException("Не удалось определить каталог .canproject.");
+        Directory.CreateDirectory(directory);
+        return fullPath;
+    }
+
+    private static CraneProject ValidateLoaded(
+        string fullPath,
+        CraneProject project)
+    {
+        Validate(project);
+        foreach (var resource in project.Resources)
+            _ = ResolveResourcePath(fullPath, resource);
+        return project;
     }
 
     private static void ValidateActive(
