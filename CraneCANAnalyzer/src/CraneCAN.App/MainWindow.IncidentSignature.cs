@@ -236,6 +236,8 @@ public partial class MainWindow
             CanUserDeleteRows = false,
             EnableRowVirtualization = true,
             GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+            SelectionMode = DataGridSelectionMode.Single,
+            SelectionUnit = DataGridSelectionUnit.FullRow,
             ItemsSource = rows
         };
 
@@ -258,13 +260,27 @@ public partial class MainWindow
             Width = new DataGridLength(1, DataGridLengthUnitType.Star)
         });
 
+        var addToProfile = new Button
+        {
+            Content = "Добавить в Machine Profile…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            IsEnabled = false,
+            ToolTip = "Доступно для MEDIUM/HIGH DATA[n]. HIGH добавляется/повышается до PROBABLE, но не CONFIRMED."
+        };
         var close = new Button
         {
             Content = "Закрыть",
             Padding = new Thickness(14, 6, 14, 6),
-            Margin = new Thickness(4),
+            Margin = new Thickness(4)
+        };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(addToProfile);
+        buttons.Children.Add(close);
 
         var layout = new Grid { Margin = new Thickness(12) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -272,10 +288,10 @@ public partial class MainWindow
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         Grid.SetRow(summary, 0);
         Grid.SetRow(grid, 1);
-        Grid.SetRow(close, 2);
+        Grid.SetRow(buttons, 2);
         layout.Children.Add(summary);
         layout.Children.Add(grid);
-        layout.Children.Add(close);
+        layout.Children.Add(buttons);
 
         var window = new Window
         {
@@ -289,6 +305,19 @@ public partial class MainWindow
             Content = layout
         };
 
+        grid.SelectionChanged += (_, _) =>
+        {
+            addToProfile.IsEnabled =
+                grid.SelectedItem is IncidentSignatureRow row &&
+                row.Candidate.Kind == IncidentTransitionKind.ByteChanged &&
+                row.Candidate.DataIndex.HasValue &&
+                row.Candidate.Priority != IncidentSignaturePriority.Info;
+        };
+        addToProfile.Click += (_, _) =>
+        {
+            if (grid.SelectedItem is IncidentSignatureRow row)
+                ShowIncidentSignatureProfileBuilder(row.Candidate, packages, window);
+        };
         close.Click += (_, _) => window.Close();
         window.ShowDialog();
     }

@@ -27,7 +27,8 @@ public enum EvidenceKind
     CurrentMeasurement,
     PhysicalOutputCheck,
     UserConfirmation,
-    IncidentCapture
+    IncidentCapture,
+    CrossIncidentSignature
 }
 
 public sealed record SignalEvidence
