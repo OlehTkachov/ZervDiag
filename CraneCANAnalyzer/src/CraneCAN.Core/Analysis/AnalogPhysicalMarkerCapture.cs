@@ -30,8 +30,8 @@ public sealed record AnalogMarkerCaptureResult
     public uint LatestObservedCanId { get; init; }
     public IReadOnlyList<uint> ObservedCanIds { get; init; } = [];
     public int? J1939Pgn { get; init; }
-    public byte? J1939SourceAddress { get; init; }
-    public byte? J1939DestinationAddress { get; init; }
+    public int? J1939SourceAddress { get; init; }
+    public int? J1939DestinationAddress { get; init; }
     public bool IsStable { get; init; }
     public string StabilityMessage { get; init; } = string.Empty;
 }
@@ -81,8 +81,8 @@ public static class AnalogPhysicalMarkerCapture
             }
         }
 
-        byte? sourceAddress = null;
-        byte? destinationAddress = null;
+        int? sourceAddress = null;
+        int? destinationAddress = null;
         int? pgn = null;
         IEnumerable<CanFrame> currentSender = matching;
         if (isJ1939)
