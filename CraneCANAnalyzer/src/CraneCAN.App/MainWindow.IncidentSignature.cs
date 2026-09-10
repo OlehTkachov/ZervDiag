@@ -260,6 +260,13 @@ public partial class MainWindow
             Width = new DataGridLength(1, DataGridLengthUnitType.Star)
         });
 
+        var saveReport = new Button
+        {
+            Content = "Сохранить отчёт…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            ToolTip = "Сохранить переносимый Markdown-отчёт без абсолютных путей к incident/capture."
+        };
         var addToProfile = new Button
         {
             Content = "Добавить в Machine Profile…",
@@ -279,6 +286,7 @@ public partial class MainWindow
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(saveReport);
         buttons.Children.Add(addToProfile);
         buttons.Children.Add(close);
 
@@ -312,6 +320,36 @@ public partial class MainWindow
                 row.Candidate.Kind == IncidentTransitionKind.ByteChanged &&
                 row.Candidate.DataIndex.HasValue &&
                 row.Candidate.Priority != IncidentSignaturePriority.Info;
+        };
+        saveReport.Click += async (_, _) =>
+        {
+            var dialog = new SaveFileDialog
+            {
+                Title = "Сохранить Cross-Incident Signature report",
+                Filter = "Markdown (*.md)|*.md|Текст (*.txt)|*.txt",
+                FileName = $"CraneCAN_incident_signature_{DateTime.Now:yyyyMMdd_HHmmss}.md"
+            };
+            if (dialog.ShowDialog(window) != true)
+                return;
+
+            try
+            {
+                await IncidentSignatureReportCodec.SaveAsync(
+                    dialog.FileName,
+                    packages,
+                    result,
+                    _machineProfile);
+                StatusText.Text =
+                    $"Cross-Incident Signature report сохранён: {dialog.FileName}";
+            }
+            catch (Exception exception)
+            {
+                MessageBox.Show(
+                    FormatException(exception),
+                    "Ошибка сохранения Signature report",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         };
         addToProfile.Click += (_, _) =>
         {
