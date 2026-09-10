@@ -11,8 +11,8 @@ public sealed record J1939IncidentStepAnnotation(
     int Sequence,
     int Pgn,
     IReadOnlyList<int> Spns,
-    byte ObservedSourceAddress,
-    byte? DestinationAddress,
+    int ObservedSourceAddress,
+    int? DestinationAddress,
     string ProtocolText,
     string EngineeringTransition);
 
@@ -24,7 +24,7 @@ public sealed record J1939IncidentProfileTimelineResult(
     IncidentProfileSignalTimelineResult Timeline,
     int Pgn,
     int? Spn,
-    IReadOnlyList<byte> SourceAddresses);
+    IReadOnlyList<int> SourceAddresses);
 
 /// <summary>
 /// Adds PGN/SPN-aware Machine Profile interpretation to an already observed
