@@ -15,7 +15,7 @@ public sealed record J1939TraceSignalSummary(
     int MatchingFrameCount,
     int DecodedFrameCount,
     int ShortFrameCount,
-    IReadOnlyList<byte> SourceAddresses,
+    IReadOnlyList<int> SourceAddresses,
     double? MinimumEngineeringValue,
     double? MaximumEngineeringValue,
     double? LatestEngineeringValue,
@@ -207,7 +207,7 @@ public static class J1939TraceSignalAnalyzer
         public int MatchingFrameCount { get; set; }
         public int ShortFrameCount { get; set; }
         public int DecodedFrameCount { get; private set; }
-        public HashSet<byte> SourceAddresses { get; } = [];
+        public HashSet<int> SourceAddresses { get; } = [];
         public double? Minimum { get; private set; }
         public double? Maximum { get; private set; }
         public double? Latest { get; private set; }
