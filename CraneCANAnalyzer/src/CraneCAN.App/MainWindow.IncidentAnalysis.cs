@@ -30,6 +30,10 @@ public partial class MainWindow
 
     private void ShowIncidentTransitionWindow(LoadedIncidentPackage package, IncidentTransitionAnalysisResult result, Window owner)
     {
+        var j1939 = J1939FirstChangesAnalyzer.Analyze(
+            package.Incident,
+            result);
+
         var warnings = result.Warnings.Count == 0
             ? "Предупреждения качества: нет."
             : "Предупреждения качества:\n• " + string.Join("\n• ", result.Warnings);
@@ -47,8 +51,12 @@ public partial class MainWindow
                 $"BASELINE: {RelativeSeconds(result.BaselineStart, result.MarkerTime)} … {RelativeSeconds(result.BaselineEnd, result.MarkerTime)} s · {result.BaselineFrameCount:N0} кадров\n" +
                 $"SEARCH: {RelativeSeconds(result.SearchStart, result.MarkerTime)} … {RelativeSeconds(result.SearchEnd, result.MarkerTime)} s · {result.SearchFrameCount:N0} кадров\n" +
                 $"Кандидаты: HIGH {result.HighCount}; MEDIUM {result.MediumCount}; INFO {result.InfoCount}. {earliest}\n" +
+                $"J1939 PGN-view: {j1939.Candidates.Count:N0} кандидатов; SA metadata changes {j1939.SourceAddressChanges.Count:N0}; " +
+                $"exact-ID lifecycle suppressed {j1939.SuppressedExactIdLifecycleCandidates:N0}.\n" +
                 warnings + "\n" +
-                "Отрицательное время означает изменение до отметки оператора. Результат показывает наблюдаемую последовательность CAN, а не автоматически установленную причину неисправности."
+                "Отрицательное время означает изменение до отметки оператора. " +
+                "Основная таблица сохраняет исходный exact-ID анализ. J1939 PGN-view доступен отдельной кнопкой и не заменяет raw evidence. " +
+                "Результат показывает наблюдаемую последовательность CAN, а не автоматически установленную причину неисправности."
         };
 
         var grid = new DataGrid
@@ -69,6 +77,16 @@ public partial class MainWindow
         grid.Columns.Add(new DataGridTextColumn { Header = "Повтор", Binding = new Binding(nameof(IncidentTransitionRow.ConfirmationText)), Width = 75 });
         grid.Columns.Add(new DataGridTextColumn { Header = "Интерпретация", Binding = new Binding(nameof(IncidentTransitionRow.Description)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
 
+        var j1939Button = new Button
+        {
+            Content = "J1939 PGN First Changes…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            IsEnabled =
+                j1939.ExtendedBaselineFrameCount > 0,
+            ToolTip =
+                "Параллельный PGN-normalized анализ 29-bit кадров: Source Address и Priority не создают ложный lifecycle ID; PDU1 Destination Address сохраняется. Raw exact-ID таблица остаётся без изменений."
+        };
         var chain = new Button
         {
             Content = "Цепочка событий",
@@ -81,6 +99,7 @@ public partial class MainWindow
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        buttons.Children.Add(j1939Button);
         buttons.Children.Add(chain);
         buttons.Children.Add(close);
 
@@ -96,6 +115,11 @@ public partial class MainWindow
             Owner = owner, Title = "CraneCAN — Incident First Changes", Width = 1280, Height = 680,
             MinWidth = 940, MinHeight = 460, WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = layout
         };
+        j1939Button.Click += (_, _) =>
+            ShowJ1939FirstChangesWindow(
+                package,
+                j1939,
+                window);
         chain.Click += (_, _) => ShowIncidentEventChainWindow(package, result, window);
         close.Click += (_, _) => window.Close();
         window.ShowDialog();
