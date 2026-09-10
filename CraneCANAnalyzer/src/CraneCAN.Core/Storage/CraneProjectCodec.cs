@@ -119,9 +119,17 @@ public static class CraneProjectCodec
         if (resources.Count == project.Resources.Count)
             return project;
 
+        var traceBindings = project.TraceBindings
+            .Where(binding =>
+                binding.ExperimentResourceId != resourceId &&
+                binding.TraceResourceId != resourceId)
+            .ToList();
+
         var updated = project with
         {
+            ProgramVersion = "0.7.0",
             Resources = resources,
+            TraceBindings = traceBindings,
             ActiveProfileResourceId =
                 project.ActiveProfileResourceId == resourceId
                     ? null
@@ -277,6 +285,8 @@ public static class CraneProjectCodec
             throw new FormatException("Bitrate проекта должен быть положительным.");
         if (project.Resources is null)
             throw new FormatException("В .canproject отсутствует список resources.");
+        if (project.TraceBindings is null)
+            throw new FormatException("В .canproject отсутствует traceBindings.");
 
         var ids = new HashSet<Guid>();
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -304,6 +314,14 @@ public static class CraneProjectCodec
             CraneProjectResourceKind.GuidedExperiment,
             project.Resources,
             "activeExperimentResourceId");
+
+        var bindingIssues = ProjectTraceBindingService.ValidateBindings(project);
+        if (bindingIssues.Count > 0)
+        {
+            throw new FormatException(
+                "Некорректные traceBindings в .canproject: " +
+                string.Join(" ", bindingIssues));
+        }
     }
 
     private static CraneProject NormalizeForSave(CraneProject project)
