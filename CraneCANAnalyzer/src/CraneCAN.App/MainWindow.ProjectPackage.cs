@@ -22,7 +22,7 @@ public partial class MainWindow
         {
             Content = "Экспорт ZIP…",
             ToolTip =
-                "Создать проверенный переносимый ZIP package из *.canproject и только зарегистрированных resources, с внутренним SHA-256 manifest.",
+                "Создать проверенный переносимый ZIP package из *.canproject и только зарегистрированных resources, с внутренним SHA-256 manifest и внешним fingerprint sidecar.",
             Padding = new Thickness(12, 5, 12, 5),
             Margin = new Thickness(4, 0, 0, 0)
         };
@@ -95,6 +95,32 @@ public partial class MainWindow
                 dialog.FileName,
                 allowOverwrite);
 
+            var fingerprintPath =
+                CraneProjectPackageTrustedFingerprintCodec.GetSidecarPath(
+                    result.ArchivePath);
+            var fingerprintWarning = string.Empty;
+            try
+            {
+                var fingerprint =
+                    CraneProjectPackageTrustedFingerprintCodec.Create(
+                        result.ArchivePath,
+                        _craneProject.ProjectId,
+                        result.ProjectFileName,
+                        result.ArchiveBytes,
+                        result.Sha256,
+                        result.PackageManifestSha256);
+                CraneProjectPackageTrustedFingerprintCodec.Save(
+                    fingerprintPath,
+                    fingerprint);
+            }
+            catch (Exception exception)
+            {
+                fingerprintWarning =
+                    "\n\nВНИМАНИЕ: ZIP создан и проверен, но внешний fingerprint sidecar " +
+                    "не удалось обновить. Не используйте старый sidecar как доверенный.\n" +
+                    FormatException(exception);
+            }
+
             StatusText.Text =
                 $"Project package создан: {Path.GetFileName(result.ArchivePath)} · " +
                 $"{result.ResourceCount} resources · SHA-256 {result.Sha256}";
@@ -108,13 +134,19 @@ public partial class MainWindow
                 $"ZIP: {FormatPackageBytes(result.ArchiveBytes)}\n" +
                 $"SHA-256 архива:\n{result.Sha256}\n\n" +
                 $"SHA-256 внутреннего package manifest:\n{result.PackageManifestSha256}\n\n" +
+                $"Внешний fingerprint:\n{fingerprintPath}\n\n" +
                 "Внутренний manifest фиксирует SHA-256 и размер каждого .canproject/resource. " +
-                "Проверены source project, staged copy и содержимое ZIP. " +
+                "Внешний fingerprint фиксирует Project ID, SHA-256 всего ZIP и SHA-256 внутреннего manifest. " +
+                "Если fingerprint передать/хранить отдельно от ZIP по доверенному каналу, " +
+                "«Проверить ZIP…» сможет обнаружить согласованную замену самого ZIP и его внутреннего manifest. " +
                 "Исходные *.canproject/resources не изменялись.\n\n" +
-                "SHA-256 manifest контролирует целостность, но не является цифровой подписью и не доказывает авторство package.",
+                "Fingerprint не является цифровой подписью и сам по себе не доказывает авторство package." +
+                fingerprintWarning,
                 "CraneCAN package готов",
                 MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                string.IsNullOrEmpty(fingerprintWarning)
+                    ? MessageBoxImage.Information
+                    : MessageBoxImage.Warning);
         }
         catch (ProjectPackageIntegrityException exception)
         {
