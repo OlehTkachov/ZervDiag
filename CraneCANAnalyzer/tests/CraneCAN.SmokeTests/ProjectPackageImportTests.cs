@@ -121,10 +121,20 @@ internal static class ProjectPackageImportTests
                     entry.FullName.Replace('\\', '/'),
                     traceRelative,
                     StringComparison.OrdinalIgnoreCase));
+                byte[] changedBytes;
+                using (var input = original.Open())
+                using (var memory = new MemoryStream())
+                {
+                    input.CopyTo(memory);
+                    changedBytes = memory.ToArray();
+                }
+                Check(changedBytes.Length > 0, "Tamper fixture must not be empty.");
+                changedBytes[^1] ^= 0x01;
                 original.Delete();
+
                 var changed = archive.CreateEntry(traceRelative);
-                using var writer = new StreamWriter(changed.Open());
-                writer.Write("payload changed after export");
+                using var outputStream = changed.Open();
+                outputStream.Write(changedBytes, 0, changedBytes.Length);
             }
 
             var destination = Path.Combine(output, "tampered-import");
@@ -139,7 +149,7 @@ internal static class ProjectPackageImportTests
                 exception is InvalidDataException &&
                 exception.Message.Contains("SHA-256 mismatch", StringComparison.OrdinalIgnoreCase) &&
                 !Directory.Exists(destination),
-                "Modified payload was not rejected by the internal SHA-256 manifest.");
+                "Modified same-length payload was not rejected by the internal SHA-256 manifest.");
         }
         finally
         {
