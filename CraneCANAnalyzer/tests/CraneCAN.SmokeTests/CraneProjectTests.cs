@@ -5,10 +5,9 @@ using CraneCAN.Core.Storage;
 internal static class CraneProjectTests
 {
     [ModuleInitializer]
-    internal static void Initialize() =>
-        RunAsync().GetAwaiter().GetResult();
+    internal static void Initialize() => Run();
 
-    private static async Task RunAsync()
+    private static void Run()
     {
         var root = Path.Combine(
             Path.GetTempPath(),
@@ -34,13 +33,13 @@ internal static class CraneProjectTests
                 "incident.canincident");
             var reportPath = Path.Combine(root, "signature.md");
 
-            await File.WriteAllTextAsync(profilePath, "profile");
-            await File.WriteAllTextAsync(experimentPath, "experiment");
-            await File.WriteAllTextAsync(incidentPath, "incident");
-            await File.WriteAllTextAsync(reportPath, "report");
-            await File.WriteAllTextAsync(outside, "outside");
+            File.WriteAllText(profilePath, "profile");
+            File.WriteAllText(experimentPath, "experiment");
+            File.WriteAllText(incidentPath, "incident");
+            File.WriteAllText(reportPath, "report");
+            File.WriteAllText(outside, "outside");
 
-            var profileBytes = await File.ReadAllBytesAsync(profilePath);
+            var profileBytes = File.ReadAllBytes(profilePath);
 
             var project = CraneProjectCodec.Create(
                 "JK1200A diagnostics",
@@ -97,10 +96,8 @@ internal static class CraneProjectTests
                 project.Resources.Count == 4,
                 "Duplicate project resource was not de-duplicated.");
 
-            project = await CraneProjectCodec.SaveAsync(
-                projectPath,
-                project);
-            var restored = await CraneProjectCodec.LoadAsync(projectPath);
+            project = CraneProjectCodec.Save(projectPath, project);
+            var restored = CraneProjectCodec.Load(projectPath);
 
             Check(
                 restored.ProjectId == project.ProjectId &&
@@ -164,8 +161,7 @@ internal static class CraneProjectTests
                 "Missing project resource was not reported.");
 
             Check(
-                profileBytes.SequenceEqual(
-                    await File.ReadAllBytesAsync(profilePath)),
+                profileBytes.SequenceEqual(File.ReadAllBytes(profilePath)),
                 "Saving .canproject modified an original resource.");
 
             var outsideRejected = false;
@@ -268,7 +264,7 @@ internal static class CraneProjectTests
             var invalidSchemaPath = Path.Combine(
                 root,
                 "future.canproject");
-            await File.WriteAllTextAsync(
+            File.WriteAllText(
                 invalidSchemaPath,
                 """
                 {
@@ -282,8 +278,7 @@ internal static class CraneProjectTests
             var schemaRejected = false;
             try
             {
-                _ = await CraneProjectCodec.LoadAsync(
-                    invalidSchemaPath);
+                _ = CraneProjectCodec.Load(invalidSchemaPath);
             }
             catch (NotSupportedException)
             {
