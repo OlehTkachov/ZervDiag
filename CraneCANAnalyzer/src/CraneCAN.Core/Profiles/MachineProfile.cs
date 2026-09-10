@@ -30,6 +30,9 @@ public sealed record MachineSignal
     public double Offset { get; init; }
     public string Unit { get; init; } = string.Empty;
     public List<SignalEnumState> EnumStates { get; init; } = [];
+    public string Protocol { get; init; } = "CAN";
+    public int? J1939Pgn { get; init; }
+    public int? J1939Spn { get; init; }
     public SignalKnowledgeState Confidence { get; init; } = SignalKnowledgeState.Candidate;
     public List<SignalEvidence> Evidence { get; init; } = [];
     public string Source { get; init; } = string.Empty;
