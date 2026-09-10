@@ -76,6 +76,14 @@ public partial class MainWindow
             IsEnabled = false,
             ToolTip = "Показать raw DATA[n] выбранного ID во всём incident относительно marker."
         };
+        var showProfileTimeline = new Button
+        {
+            Content = "График Profile signal…",
+            Padding = new Thickness(14, 6, 14, 6),
+            Margin = new Thickness(4),
+            IsEnabled = false,
+            ToolTip = "Декодировать выбранный DATA[n] через текущий Machine Profile. BigEndian пока намеренно не угадывается."
+        };
         var addSignal = new Button
         {
             Content = "Добавить DATA-шаг в профиль…",
@@ -96,6 +104,7 @@ public partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Right
         };
         buttons.Children.Add(showTimeline);
+        buttons.Children.Add(showProfileTimeline);
         buttons.Children.Add(addSignal);
         buttons.Children.Add(close);
 
@@ -128,6 +137,7 @@ public partial class MainWindow
                                  row.Step.Kind == IncidentTransitionKind.ByteChanged &&
                                  row.Step.DataIndex.HasValue;
             showTimeline.IsEnabled = canUseByteStep;
+            showProfileTimeline.IsEnabled = canUseByteStep;
             addSignal.IsEnabled = canUseByteStep;
         };
         showTimeline.Click += (_, _) =>
@@ -137,6 +147,15 @@ public partial class MainWindow
                 row.Step.DataIndex.HasValue)
             {
                 ShowIncidentSignalTimeline(package, row.Step, window);
+            }
+        };
+        showProfileTimeline.Click += (_, _) =>
+        {
+            if (grid.SelectedItem is IncidentEventChainRow row &&
+                row.Step.Kind == IncidentTransitionKind.ByteChanged &&
+                row.Step.DataIndex.HasValue)
+            {
+                ShowIncidentProfileSignalTimeline(package, row.Step, window);
             }
         };
         addSignal.Click += (_, _) =>

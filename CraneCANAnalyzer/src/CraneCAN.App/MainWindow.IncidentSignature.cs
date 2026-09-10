@@ -120,7 +120,7 @@ public partial class MainWindow
 
         var knownBitrates = packages
             .Where(package => package.Source.Bitrate.HasValue)
-            .Select(package => package.Source.Bitrate.Value)
+            .Select(package => package.Source.Bitrate.GetValueOrDefault())
             .Distinct()
             .OrderBy(value => value)
             .ToArray();
