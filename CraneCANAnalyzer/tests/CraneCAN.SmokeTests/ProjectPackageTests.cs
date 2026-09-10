@@ -7,18 +7,17 @@ using CraneCAN.Core.Storage;
 internal static class ProjectPackageTests
 {
     [ModuleInitializer]
-    internal static void Initialize() =>
-        RunAsync().GetAwaiter().GetResult();
+    internal static void Initialize() => Run();
 
-    private static async Task RunAsync()
+    private static void Run()
     {
-        await TestPortableZipRoundTripAsync();
-        await TestIntegrityWarningBlocksExportAsync();
-        await TestOverwriteProtectionAsync();
-        await TestDestinationCannotOverwriteResourceAsync();
+        TestPortableZipRoundTrip();
+        TestIntegrityWarningBlocksExport();
+        TestOverwriteProtection();
+        TestDestinationCannotOverwriteResource();
     }
 
-    private static async Task TestPortableZipRoundTripAsync()
+    private static void TestPortableZipRoundTrip()
     {
         var root = TempDirectory("cranecan-package-source");
         var output = TempDirectory("cranecan-package-output");
@@ -75,10 +74,12 @@ internal static class ProjectPackageTests
             var sourceReportBytes = File.ReadAllBytes(reportPath);
 
             var archivePath = Path.Combine(output, "JK1200A-package.zip");
-            var result = await CraneProjectPackageExporter.ExportZipAsync(
-                projectPath,
-                project,
-                archivePath);
+            var result = CraneProjectPackageExporter.ExportZipAsync(
+                    projectPath,
+                    project,
+                    archivePath)
+                .GetAwaiter()
+                .GetResult();
 
             Check(File.Exists(archivePath), "Portable ZIP package was not created.");
             var actualArchiveSha256 = Convert.ToHexString(
@@ -131,9 +132,11 @@ internal static class ProjectPackageTests
                 extracted,
                 "SOOSAN_JK1200A.canproject");
             var extractedProject = CraneProjectCodec.Load(extractedProjectPath);
-            var extractedIntegrity = await ProjectIntegrityAnalyzer.AnalyzeAsync(
-                extractedProjectPath,
-                extractedProject);
+            var extractedIntegrity = ProjectIntegrityAnalyzer.AnalyzeAsync(
+                    extractedProjectPath,
+                    extractedProject)
+                .GetAwaiter()
+                .GetResult();
 
             Check(
                 extractedProject.ProjectId == project.ProjectId &&
@@ -156,7 +159,7 @@ internal static class ProjectPackageTests
         }
     }
 
-    private static async Task TestIntegrityWarningBlocksExportAsync()
+    private static void TestIntegrityWarningBlocksExport()
     {
         var root = TempDirectory("cranecan-package-warning");
         var output = TempDirectory("cranecan-package-warning-output");
@@ -189,10 +192,12 @@ internal static class ProjectPackageTests
             ProjectPackageIntegrityException? caught = null;
             try
             {
-                _ = await CraneProjectPackageExporter.ExportZipAsync(
-                    projectPath,
-                    project,
-                    archivePath);
+                _ = CraneProjectPackageExporter.ExportZipAsync(
+                        projectPath,
+                        project,
+                        archivePath)
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (ProjectPackageIntegrityException exception)
             {
@@ -214,7 +219,7 @@ internal static class ProjectPackageTests
         }
     }
 
-    private static async Task TestOverwriteProtectionAsync()
+    private static void TestOverwriteProtection()
     {
         var root = TempDirectory("cranecan-package-overwrite");
         var output = TempDirectory("cranecan-package-overwrite-output");
@@ -239,11 +244,13 @@ internal static class ProjectPackageTests
             var blocked = false;
             try
             {
-                _ = await CraneProjectPackageExporter.ExportZipAsync(
-                    projectPath,
-                    project,
-                    archivePath,
-                    overwrite: false);
+                _ = CraneProjectPackageExporter.ExportZipAsync(
+                        projectPath,
+                        project,
+                        archivePath,
+                        overwrite: false)
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (IOException)
             {
@@ -255,11 +262,13 @@ internal static class ProjectPackageTests
                 File.ReadAllText(archivePath) == "keep me",
                 "Existing package was overwritten without explicit permission.");
 
-            var result = await CraneProjectPackageExporter.ExportZipAsync(
-                projectPath,
-                project,
-                archivePath,
-                overwrite: true);
+            var result = CraneProjectPackageExporter.ExportZipAsync(
+                    projectPath,
+                    project,
+                    archivePath,
+                    overwrite: true)
+                .GetAwaiter()
+                .GetResult();
             Check(
                 result.ArchiveBytes > 0 &&
                 new FileInfo(archivePath).Length == result.ArchiveBytes,
@@ -272,7 +281,7 @@ internal static class ProjectPackageTests
         }
     }
 
-    private static async Task TestDestinationCannotOverwriteResourceAsync()
+    private static void TestDestinationCannotOverwriteResource()
     {
         var root = TempDirectory("cranecan-package-collision");
 
@@ -294,11 +303,13 @@ internal static class ProjectPackageTests
             var rejected = false;
             try
             {
-                _ = await CraneProjectPackageExporter.ExportZipAsync(
-                    projectPath,
-                    project,
-                    reportPath,
-                    overwrite: true);
+                _ = CraneProjectPackageExporter.ExportZipAsync(
+                        projectPath,
+                        project,
+                        reportPath,
+                        overwrite: true)
+                    .GetAwaiter()
+                    .GetResult();
             }
             catch (InvalidOperationException)
             {
