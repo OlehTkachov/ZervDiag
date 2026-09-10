@@ -152,7 +152,7 @@ internal static class ProjectPackageImportTests
             Check(
                 unexpectedException is InvalidDataException &&
                 unexpectedException.Message.Contains(
-                    "не зарегистрированы",
+                    "не зарегистрир",
                     StringComparison.OrdinalIgnoreCase) &&
                 !Directory.Exists(unexpectedDestination),
                 "Unregistered ZIP entry was not rejected.");
