@@ -1,0 +1,41 @@
+name: CraneCAN Assistant Windows CI
+
+on:
+  push:
+    branches:
+      - feature/assistant-live-guided-next
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cranecan-assistant-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build, smoke-test and publish CraneCAN
+        shell: pwsh
+        run: ./CraneCANAnalyzer/build-windows.ps1
+
+      - name: Upload Windows x64 build
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CraneCAN-Live-win-x64
+          path: CraneCANAnalyzer/publish/live-guided-win-x64
+          if-no-files-found: error
+          retention-days: 14
