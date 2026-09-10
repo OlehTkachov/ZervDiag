@@ -16,6 +16,7 @@ public partial class MainWindow
         Loaded += (_, _) =>
         {
             EnsureProjectPackageButton();
+            EnsureProjectPackageVerifyButton();
             EnsureProjectPackageImportButton();
         };
     }
@@ -37,17 +38,22 @@ public partial class MainWindow
         };
         button.Click += ProjectPackageImportButton_Click;
 
+        var verifyIndex = _projectPackageVerifyButton is null
+            ? -1
+            : panel.Children.IndexOf(_projectPackageVerifyButton);
         var exportIndex = _projectPackageButton is null
             ? -1
             : panel.Children.IndexOf(_projectPackageButton);
         var integrityIndex = _projectIntegrityButton is null
             ? -1
             : panel.Children.IndexOf(_projectIntegrityButton);
-        var insertIndex = exportIndex >= 0
-            ? exportIndex + 1
-            : integrityIndex >= 0
-                ? integrityIndex + 1
-                : panel.Children.Count;
+        var insertIndex = verifyIndex >= 0
+            ? verifyIndex + 1
+            : exportIndex >= 0
+                ? exportIndex + 1
+                : integrityIndex >= 0
+                    ? integrityIndex + 1
+                    : panel.Children.Count;
 
         panel.Children.Insert(insertIndex, button);
         _projectPackageImportButton = button;
