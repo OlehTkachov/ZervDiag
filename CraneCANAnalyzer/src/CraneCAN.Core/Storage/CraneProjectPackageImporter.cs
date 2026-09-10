@@ -440,7 +440,7 @@ public static class CraneProjectPackageImporter
             value = value.TrimEnd('/');
 
         if (value.Length == 0 ||
-            value.StartsWith('/', StringComparison.Ordinal) ||
+            value.StartsWith("/", StringComparison.Ordinal) ||
             value.StartsWith("//", StringComparison.Ordinal) ||
             (value.Length >= 2 && char.IsLetter(value[0]) && value[1] == ':'))
         {
