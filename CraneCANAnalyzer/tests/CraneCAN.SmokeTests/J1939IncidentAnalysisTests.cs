@@ -59,7 +59,7 @@ internal static class J1939IncidentAnalysisTests
             summary.MatchingFrameCount == 3 &&
             summary.DecodedFrameCount == 2 &&
             summary.ShortFrameCount == 1 &&
-            summary.SourceAddresses.SequenceEqual(new byte[] { 0xA1, 0xB2, 0xC3 }) &&
+            summary.SourceAddresses.SequenceEqual(new[] { 0xA1, 0xB2, 0xC3 }) &&
             Math.Abs(summary.MinimumEngineeringValue!.Value - 800) < 0.000001 &&
             Math.Abs(summary.MaximumEngineeringValue!.Value - 1000) < 0.000001 &&
             Math.Abs(summary.LatestEngineeringValue!.Value - 1000) < 0.000001,
@@ -183,7 +183,7 @@ internal static class J1939IncidentAnalysisTests
         Check(
             result.Pgn == 0x0F004 &&
             result.Spn == 190 &&
-            result.SourceAddresses.SequenceEqual(new byte[] { 0xA1, 0xB2 }) &&
+            result.SourceAddresses.SequenceEqual(new[] { 0xA1, 0xB2 }) &&
             result.Timeline.MatchingFrameCount == 4 &&
             result.Timeline.SourceFrameCount == 4 &&
             result.Timeline.RenderedPoints.Count == 4,
