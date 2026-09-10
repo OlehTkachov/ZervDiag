@@ -1,5 +1,6 @@
 using CraneCAN.Core.Analysis;
 using CraneCAN.Core.Models;
+using CraneCAN.Core.Projects;
 using CraneCAN.Core.Storage;
 
 namespace CraneCAN.Core.Guided;
@@ -15,11 +16,11 @@ public static class GuidedExperimentRunLoader
 
         var referencePath = ResolveDependency(
             definition.RepeatNumber,
-            "REFERENCE",
+            ProjectTraceBindingRole.Reference,
             definition.ReferenceSource.Path);
         var actionPath = ResolveDependency(
             definition.RepeatNumber,
-            "ACTION",
+            ProjectTraceBindingRole.Action,
             definition.ActionSource.Path);
 
         var reference = await PcanTrcCodec.LoadAsync(
@@ -43,7 +44,7 @@ public static class GuidedExperimentRunLoader
         {
             var returnPath = ResolveDependency(
                 definition.RepeatNumber,
-                "RETURN",
+                ProjectTraceBindingRole.Return,
                 definition.ReturnSource.Path);
             var trace = string.Equals(
                     returnPath,
@@ -85,10 +86,13 @@ public static class GuidedExperimentRunLoader
 
     private static string ResolveDependency(
         int repeatNumber,
-        string role,
+        ProjectTraceBindingRole role,
         string requestedPath)
     {
-        var resolution = ProjectTraceDependencyResolver.Resolve(requestedPath);
+        var resolution = ProjectTraceBindingResolver.Resolve(
+            repeatNumber,
+            role,
+            requestedPath);
         if (resolution.CanLoad)
             return resolution.ResolvedPath!;
 
@@ -96,10 +100,18 @@ public static class GuidedExperimentRunLoader
             ? " Кандидаты: " + string.Join(", ", resolution.Candidates) + "."
             : string.Empty;
         throw new FileNotFoundException(
-            $"Повтор {repeatNumber}: TRC {role} не найден. " +
+            $"Повтор {repeatNumber}: TRC {RoleText(role)} не найден. " +
             resolution.Message + candidates,
             resolution.ResolvedPath ?? requestedPath);
     }
+
+    private static string RoleText(ProjectTraceBindingRole role) => role switch
+    {
+        ProjectTraceBindingRole.Reference => "REFERENCE",
+        ProjectTraceBindingRole.Action => "ACTION",
+        ProjectTraceBindingRole.Return => "RETURN",
+        _ => role.ToString().ToUpperInvariant()
+    };
 
     private static CanFrame[] Select(
         IReadOnlyList<CanFrame> frames,
