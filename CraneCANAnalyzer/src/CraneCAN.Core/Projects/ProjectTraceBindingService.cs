@@ -1,3 +1,5 @@
+using CraneCAN.Core.Storage;
+
 namespace CraneCAN.Core.Projects;
 
 /// <summary>
