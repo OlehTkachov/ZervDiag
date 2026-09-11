@@ -1,0 +1,19 @@
+{
+  "profileId": "49000000-0000-0000-0000-000000000001",
+  "profileSchemaVersion": 1,
+  "manufacturer": "Hirschmann",
+  "model": "HC4900",
+  "serialNumber": null,
+  "machineName": "Hirschmann HC4900",
+  "subsystem": "LMI / Load Moment Indicator",
+  "canBusName": "HC4900 CAN",
+  "bitrate": 125000,
+  "canType": "Classical CAN / CANopen 2.0B",
+  "knownSignals": [],
+  "experimentalSignals": [],
+  "rejectedCandidates": [],
+  "notes": "Шаблон HC4900 по HC4900 System Service Manual. CANopen Node-ID: 1 IC4600 display; 3 HC4900 CU/Mentor; 15 length/angle sensor; 60 (0x3C) piston pressure; 61 (0x3D) rod pressure. A2B, основной length/angle, дополнительный 4–20 mA length sensor и wind speed поступают в CAN через converter board кабельного барабана; отдельные Node-ID для них в использованном руководстве не задокументированы. Ошибки связи: E61 all CAN units; E62 pressure transfer; E63 pressure internal; E64 length/angle transfer; E94 CU-console. KnownSignals намеренно пуст: руководство не задаёт COB-ID/байты прикладных данных. Заполняйте сигналы только по повторяемым capture/evidence. Перед реальным подключением подтвердите bitrate конкретной машины. Listen-only.",
+  "createdAt": "2026-09-11T08:00:00+00:00",
+  "updatedAt": "2026-09-11T08:00:00+00:00",
+  "programVersion": "0.7.0"
+}

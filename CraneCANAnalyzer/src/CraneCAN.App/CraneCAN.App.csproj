@@ -54,6 +54,18 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>docs\LIVE_GUIDED_DIAGNOSTICS.md</TargetPath>
     </Content>
+    <Content Include="..\..\docs\HC4900_PROFILE.md">
+      <Link>docs\HC4900_PROFILE.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\HC4900_PROFILE.md</TargetPath>
+    </Content>
+    <Content Include="..\..\profiles\hirschmann_hc4900.craneprofile">
+      <Link>profiles\hirschmann_hc4900.craneprofile</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>profiles\hirschmann_hc4900.craneprofile</TargetPath>
+    </Content>
     <Content Include="..\..\tests\CraneCAN.SmokeTests\Fixtures\soosan_mixed.trc">
       <Link>samples\soosan_mixed.trc</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
