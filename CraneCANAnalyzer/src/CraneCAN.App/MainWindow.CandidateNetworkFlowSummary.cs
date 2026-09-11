@@ -49,9 +49,9 @@ public partial class MainWindow
         if (descriptor is not null)
         {
             descriptor.AddValueChanged(GuidedCandidatesGrid, (_, _) =>
-                Dispatcher.BeginInvoke(UpdateGuidedNetworkFlowSummary));
+                Dispatcher.BeginInvoke(new Action(UpdateGuidedNetworkFlowSummary)));
             descriptor.AddValueChanged(LiveCandidatesGrid, (_, _) =>
-                Dispatcher.BeginInvoke(UpdateLiveNetworkFlowSummary));
+                Dispatcher.BeginInvoke(new Action(UpdateLiveNetworkFlowSummary)));
         }
 
         UpdateGuidedNetworkFlowSummary();
