@@ -14,6 +14,27 @@ public static class Hc4900Profile
     public const string ProfileId = "hirschmann-hc4900";
     public const int DefaultBitrate = 125_000;
 
+    // These collections must be initialized before SystemProfile. Static field/property
+    // initializers execute in source order; keeping them above SystemProfile prevents
+    // null values from being passed to CanSystemProfile during type initialization.
+    public static IReadOnlyList<CanNodeDefinition> Nodes { get; } =
+    [
+        new(1, "IC4600 display", "Documented CAN Bus State Node-ID"),
+        new(3, "HC4900 central unit / Mentor", "Documented CAN Bus State Node-ID"),
+        new(15, "Length / angle sensor (cable reel CAN converter)", "Documented CAN Bus State Node-ID"),
+        new(60, "Piston oil pressure sensor (0x3C)", "Documented Node-ID"),
+        new(61, "Rod oil pressure sensor (0x3D)", "Documented Node-ID")
+    ];
+
+    public static IReadOnlyList<DiagnosticCodeDefinition> Diagnostics { get; } =
+    [
+        new("E61", "Ошибка передачи данных CAN для всех CAN-устройств"),
+        new("E62", "Ошибка передачи данных CAN узла датчика давления"),
+        new("E63", "Внутренняя ошибка CAN-узла датчика давления"),
+        new("E64", "Ошибка передачи данных CAN узла датчика длины/угла (cable reel)"),
+        new("E94", "Ошибка CAN-связи между HC4900 CU и консолью IC4600")
+    ];
+
     public static CanSystemProfile SystemProfile { get; } = new(
         ProfileId,
         "Hirschmann HC4900 / IC4600",
@@ -51,22 +72,4 @@ public static class Hc4900Profile
             "KnownSignals намеренно пуст: руководство не задаёт COB-ID/байты прикладных данных. " +
             "Заполняйте сигналы только по повторяемым capture/evidence. Listen-only."
     };
-
-    public static IReadOnlyList<CanNodeDefinition> Nodes { get; } =
-    [
-        new(1, "IC4600 display", "Documented CAN Bus State Node-ID"),
-        new(3, "HC4900 central unit / Mentor", "Documented CAN Bus State Node-ID"),
-        new(15, "Length / angle sensor (cable reel CAN converter)", "Documented CAN Bus State Node-ID"),
-        new(60, "Piston oil pressure sensor (0x3C)", "Documented Node-ID"),
-        new(61, "Rod oil pressure sensor (0x3D)", "Documented Node-ID")
-    ];
-
-    public static IReadOnlyList<DiagnosticCodeDefinition> Diagnostics { get; } =
-    [
-        new("E61", "Ошибка передачи данных CAN для всех CAN-устройств"),
-        new("E62", "Ошибка передачи данных CAN узла датчика давления"),
-        new("E63", "Внутренняя ошибка CAN-узла датчика давления"),
-        new("E64", "Ошибка передачи данных CAN узла датчика длины/угла (cable reel)"),
-        new("E94", "Ошибка CAN-связи между HC4900 CU и консолью IC4600")
-    ];
 }
