@@ -1,0 +1,193 @@
+using System.Globalization;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using CraneCAN.Core.Storage;
+using Microsoft.Win32;
+
+namespace CraneCAN.App;
+
+public partial class MainWindow
+{
+    private Button? _projectPackageButton;
+
+    private void EnsureProjectPackageButton()
+    {
+        if (_projectPackageButton is not null)
+            return;
+        if (ClearButton.Parent is not Panel panel)
+            return;
+
+        var button = new Button
+        {
+            Content = "Экспорт ZIP…",
+            ToolTip =
+                "Создать проверенный переносимый ZIP package из *.canproject и только зарегистрированных resources, с внутренним SHA-256 manifest и внешним fingerprint sidecar.",
+            Padding = new Thickness(12, 5, 12, 5),
+            Margin = new Thickness(4, 0, 0, 0)
+        };
+        button.Click += ProjectPackageButton_Click;
+
+        var integrityIndex = _projectIntegrityButton is null
+            ? -1
+            : panel.Children.IndexOf(_projectIntegrityButton);
+        var bindingIndex = _projectTraceBindingsButton is null
+            ? -1
+            : panel.Children.IndexOf(_projectTraceBindingsButton);
+        var projectIndex = _projectButton is null
+            ? -1
+            : panel.Children.IndexOf(_projectButton);
+        var clearIndex = panel.Children.IndexOf(ClearButton);
+        var insertIndex = integrityIndex >= 0
+            ? integrityIndex + 1
+            : bindingIndex >= 0
+                ? bindingIndex + 1
+                : projectIndex >= 0
+                    ? projectIndex + 1
+                    : clearIndex >= 0
+                        ? clearIndex + 1
+                        : panel.Children.Count;
+
+        panel.Children.Insert(insertIndex, button);
+        _projectPackageButton = button;
+    }
+
+    private async void ProjectPackageButton_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_craneProjectPath))
+        {
+            MessageBox.Show(
+                "Сначала создайте или откройте *.canproject и сохраните его на диск.",
+                "Экспорт CraneCAN package",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var packageName = SanitizeFileName(
+            string.IsNullOrWhiteSpace(_craneProject.Name)
+                ? "CraneCAN_project"
+                : _craneProject.Name);
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Экспортировать переносимый CraneCAN package",
+            Filter = "CraneCAN ZIP package (*.zip)|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            OverwritePrompt = true,
+            CheckPathExists = true,
+            FileName = packageName + "_package.zip"
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        var allowOverwrite = File.Exists(dialog.FileName);
+
+        try
+        {
+            SetBusy(true, "Проверка, SHA-256 manifest и упаковка CraneCAN project…");
+            var result = await CraneProjectPackageExporter.ExportZipAsync(
+                _craneProjectPath,
+                _craneProject,
+                dialog.FileName,
+                allowOverwrite);
+
+            var fingerprintPath =
+                CraneProjectPackageTrustedFingerprintCodec.GetSidecarPath(
+                    result.ArchivePath);
+            var fingerprintWarning = string.Empty;
+            try
+            {
+                var fingerprint =
+                    CraneProjectPackageTrustedFingerprintCodec.Create(
+                        result.ArchivePath,
+                        _craneProject.ProjectId,
+                        result.ProjectFileName,
+                        result.ArchiveBytes,
+                        result.Sha256,
+                        result.PackageManifestSha256);
+                CraneProjectPackageTrustedFingerprintCodec.Save(
+                    fingerprintPath,
+                    fingerprint);
+            }
+            catch (Exception exception)
+            {
+                fingerprintWarning =
+                    "\n\nВНИМАНИЕ: ZIP создан и проверен, но внешний fingerprint sidecar " +
+                    "не удалось обновить. Не используйте старый sidecar как доверенный.\n" +
+                    FormatException(exception);
+            }
+
+            StatusText.Text =
+                $"Project package создан: {Path.GetFileName(result.ArchivePath)} · " +
+                $"{result.ResourceCount} resources · SHA-256 {result.Sha256}";
+
+            MessageBox.Show(
+                "Переносимый CraneCAN package создан и проверен.\n\n" +
+                $"Файл: {result.ArchivePath}\n" +
+                $"Resources: {result.ResourceCount}\n" +
+                $"Файлов в ZIP: {result.FileCount}\n" +
+                $"Исходный объём: {FormatPackageBytes(result.UncompressedBytes)}\n" +
+                $"ZIP: {FormatPackageBytes(result.ArchiveBytes)}\n" +
+                $"SHA-256 архива:\n{result.Sha256}\n\n" +
+                $"SHA-256 внутреннего package manifest:\n{result.PackageManifestSha256}\n\n" +
+                $"Внешний fingerprint:\n{fingerprintPath}\n\n" +
+                "Внутренний manifest фиксирует SHA-256 и размер каждого .canproject/resource. " +
+                "Внешний fingerprint фиксирует Project ID, SHA-256 всего ZIP и SHA-256 внутреннего manifest. " +
+                "Если fingerprint передать/хранить отдельно от ZIP по доверенному каналу, " +
+                "«Проверить ZIP…» сможет обнаружить согласованную замену самого ZIP и его внутреннего manifest. " +
+                "Исходные *.canproject/resources не изменялись.\n\n" +
+                "Fingerprint не является цифровой подписью и сам по себе не доказывает авторство package." +
+                fingerprintWarning,
+                "CraneCAN package готов",
+                MessageBoxButton.OK,
+                string.IsNullOrEmpty(fingerprintWarning)
+                    ? MessageBoxImage.Information
+                    : MessageBoxImage.Warning);
+        }
+        catch (ProjectPackageIntegrityException exception)
+        {
+            StatusText.Text =
+                $"Project package не создан: ошибок {exception.IntegrityReport.ErrorCount}, " +
+                $"предупреждений {exception.IntegrityReport.WarningCount}.";
+            MessageBox.Show(
+                exception.Message +
+                "\n\nИсправьте Project Integrity и повторите экспорт. ZIP не создан.",
+                "Экспорт остановлен",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            ShowProjectIntegrityReport(exception.IntegrityReport);
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                FormatException(exception),
+                "Ошибка экспорта CraneCAN package",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private static string FormatPackageBytes(long bytes)
+    {
+        if (bytes < 1024)
+            return bytes.ToString(CultureInfo.InvariantCulture) + " B";
+
+        var kib = bytes / 1024d;
+        if (kib < 1024)
+            return kib.ToString("F2", CultureInfo.InvariantCulture) + " KiB";
+
+        var mib = kib / 1024d;
+        if (mib < 1024)
+            return mib.ToString("F2", CultureInfo.InvariantCulture) + " MiB";
+
+        return (mib / 1024d).ToString("F2", CultureInfo.InvariantCulture) + " GiB";
+    }
+}

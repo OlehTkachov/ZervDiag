@@ -1,46 +1,127 @@
 using CraneCAN.Core.Analysis;
 using CraneCAN.Core.Models;
+using CraneCAN.Core.Projects;
 using CraneCAN.Core.Storage;
 
 namespace CraneCAN.Core.Guided;
 
 public static class GuidedExperimentRunLoader
 {
-    public static async Task<GuidedExperimentRun> LoadAsync(GuidedExperimentRepeat definition,
+    public static async Task<GuidedExperimentRun> LoadAsync(
+        GuidedExperimentRepeat definition,
         CancellationToken cancellationToken = default)
     {
         if (definition.ReferenceSource.Window is null || definition.ActionSource.Window is null)
             throw new InvalidDataException($"Повтор {definition.RepeatNumber} не содержит временных окон.");
-        var reference = await PcanTrcCodec.LoadAsync(definition.ReferenceSource.Path,
-            definition.ReferenceSource.Channel, cancellationToken).ConfigureAwait(false);
-        var action = string.Equals(definition.ReferenceSource.Path, definition.ActionSource.Path, StringComparison.OrdinalIgnoreCase)
-            ? reference : await PcanTrcCodec.LoadAsync(definition.ActionSource.Path,
-                definition.ActionSource.Channel, cancellationToken).ConfigureAwait(false);
+
+        var referencePath = ResolveDependency(
+            definition.RepeatNumber,
+            ProjectTraceBindingRole.Reference,
+            definition.ReferenceSource.Path);
+        var actionPath = ResolveDependency(
+            definition.RepeatNumber,
+            ProjectTraceBindingRole.Action,
+            definition.ActionSource.Path);
+
+        var reference = await PcanTrcCodec.LoadAsync(
+                referencePath,
+                definition.ReferenceSource.Channel,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var action = string.Equals(
+                referencePath,
+                actionPath,
+                StringComparison.OrdinalIgnoreCase)
+            ? reference
+            : await PcanTrcCodec.LoadAsync(
+                    actionPath,
+                    definition.ActionSource.Channel,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
         IReadOnlyList<CanFrame>? returned = null;
         if (definition.ReturnSource?.Window is { } returnWindow)
         {
-            var trace = string.Equals(definition.ReturnSource.Path, definition.ReferenceSource.Path, StringComparison.OrdinalIgnoreCase)
-                ? reference : string.Equals(definition.ReturnSource.Path, definition.ActionSource.Path, StringComparison.OrdinalIgnoreCase)
-                    ? action : await PcanTrcCodec.LoadAsync(definition.ReturnSource.Path,
-                        definition.ReturnSource.Channel, cancellationToken).ConfigureAwait(false);
+            var returnPath = ResolveDependency(
+                definition.RepeatNumber,
+                ProjectTraceBindingRole.Return,
+                definition.ReturnSource.Path);
+            var trace = string.Equals(
+                    returnPath,
+                    referencePath,
+                    StringComparison.OrdinalIgnoreCase)
+                ? reference
+                : string.Equals(
+                    returnPath,
+                    actionPath,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? action
+                    : await PcanTrcCodec.LoadAsync(
+                            returnPath,
+                            definition.ReturnSource.Channel,
+                            cancellationToken)
+                        .ConfigureAwait(false);
             returned = Select(trace, returnWindow);
         }
+
         var actionOrigin = action.Min(frame => frame.Timestamp);
-        return new GuidedExperimentRun(definition.RepeatNumber, definition.ActionSource.Bus,
-            Select(reference, definition.ReferenceSource.Window), Select(action, definition.ActionSource.Window),
+        return new GuidedExperimentRun(
+            definition.RepeatNumber,
+            definition.ActionSource.Bus,
+            Select(reference, definition.ReferenceSource.Window),
+            Select(action, definition.ActionSource.Window),
             definition.ActionApproximateTimeMilliseconds.HasValue
-                ? actionOrigin.AddMilliseconds(definition.ActionApproximateTimeMilliseconds.Value) : null,
-            TimeSpan.FromMilliseconds(definition.EventSearchToleranceMilliseconds), returned,
-            definition.ReferenceSource.Window, definition.ActionSource.Window,
-            definition.ReferenceSource.Path, definition.ActionSource.Path,
-            definition.ReferenceSource.Bus, definition.ActionSource.Bus);
+                ? actionOrigin.AddMilliseconds(
+                    definition.ActionApproximateTimeMilliseconds.Value)
+                : null,
+            TimeSpan.FromMilliseconds(definition.EventSearchToleranceMilliseconds),
+            returned,
+            definition.ReferenceSource.Window,
+            definition.ActionSource.Window,
+            referencePath,
+            actionPath,
+            definition.ReferenceSource.Bus,
+            definition.ActionSource.Bus);
     }
 
-    private static CanFrame[] Select(IReadOnlyList<CanFrame> frames, TraceWindow window)
+    private static string ResolveDependency(
+        int repeatNumber,
+        ProjectTraceBindingRole role,
+        string requestedPath)
+    {
+        var resolution = ProjectTraceBindingResolver.Resolve(
+            repeatNumber,
+            role,
+            requestedPath);
+        if (resolution.CanLoad)
+            return resolution.ResolvedPath!;
+
+        var candidates = resolution.Candidates is { Count: > 0 }
+            ? " Кандидаты: " + string.Join(", ", resolution.Candidates) + "."
+            : string.Empty;
+        throw new FileNotFoundException(
+            $"Повтор {repeatNumber}: TRC {RoleText(role)} не найден. " +
+            resolution.Message + candidates,
+            resolution.ResolvedPath ?? requestedPath);
+    }
+
+    private static string RoleText(ProjectTraceBindingRole role) => role switch
+    {
+        ProjectTraceBindingRole.Reference => "REFERENCE",
+        ProjectTraceBindingRole.Action => "ACTION",
+        ProjectTraceBindingRole.Return => "RETURN",
+        _ => role.ToString().ToUpperInvariant()
+    };
+
+    private static CanFrame[] Select(
+        IReadOnlyList<CanFrame> frames,
+        TraceWindow window)
     {
         var origin = frames.Min(frame => frame.Timestamp);
         var start = origin.AddMilliseconds(window.StartMilliseconds);
         var end = origin.AddMilliseconds(window.EndMilliseconds);
-        return frames.Where(frame => frame.Timestamp >= start && frame.Timestamp < end).ToArray();
+        return frames
+            .Where(frame => frame.Timestamp >= start && frame.Timestamp < end)
+            .ToArray();
     }
 }
