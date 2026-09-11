@@ -58,6 +58,17 @@ public static class CandidateProtocolHints
         return true;
     }
 
+    public static bool IsLikelyDiscrete(GuidedCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+
+        if (candidate.BitIndex.HasValue || candidate.ChangeKind == CandidateChangeKind.StableBit)
+            return true;
+
+        return candidate.ChangeKind == CandidateChangeKind.StableByte &&
+               IsSingleBitTransition(candidate);
+    }
+
     public static string Classify(GuidedCandidate candidate)
     {
         ArgumentNullException.ThrowIfNull(candidate);
