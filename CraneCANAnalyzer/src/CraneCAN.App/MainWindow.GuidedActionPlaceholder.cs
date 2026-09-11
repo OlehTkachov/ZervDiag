@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
 
@@ -9,14 +10,25 @@ public partial class MainWindow
     private Brush? _guidedActionNormalBackground;
     private Brush? _guidedActionPlaceholderBackground;
 
-    protected override void OnContentRendered(EventArgs e)
+    [ModuleInitializer]
+    internal static void InstallGuidedActionPlaceholderInitializer()
     {
-        base.OnContentRendered(e);
+        EventManager.RegisterClassHandler(
+            typeof(MainWindow),
+            FrameworkElement.LoadedEvent,
+            new RoutedEventHandler(GuidedActionPlaceholderMainWindowLoaded));
+    }
 
+    private static void GuidedActionPlaceholderMainWindowLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is MainWindow window)
+            window.InitializeGuidedActionPlaceholder();
+    }
+
+    private void InitializeGuidedActionPlaceholder()
+    {
         if (_guidedActionPlaceholderInitialized)
-        {
             return;
-        }
 
         _guidedActionPlaceholderInitialized = true;
         _guidedActionNormalBackground = GuidedActionNameTextBox.Background;
@@ -25,9 +37,7 @@ public partial class MainWindow
         // "Joystick EXTEND" used to be a real default value. It must not be saved as
         // user input: replace only that legacy startup value with an empty TextBox.
         if (string.Equals(GuidedActionNameTextBox.Text, "Joystick EXTEND", StringComparison.Ordinal))
-        {
             GuidedActionNameTextBox.Text = string.Empty;
-        }
 
         GuidedActionNameTextBox.GotKeyboardFocus += (_, _) => RefreshGuidedActionPlaceholder();
         GuidedActionNameTextBox.LostKeyboardFocus += (_, _) => RefreshGuidedActionPlaceholder();
