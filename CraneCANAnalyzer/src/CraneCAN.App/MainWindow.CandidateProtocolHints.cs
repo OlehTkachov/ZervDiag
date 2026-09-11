@@ -80,6 +80,16 @@ public partial class MainWindow
             }
         });
 
+        grid.Columns.Insert(insertIndex++, new DataGridTextColumn
+        {
+            Header = "DA",
+            Width = 62,
+            Binding = new Binding(nameof(GuidedCandidateRow.Candidate))
+            {
+                Converter = CandidateDestinationAddressConverter.Instance
+            }
+        });
+
         grid.Columns.Insert(insertIndex, new DataGridTextColumn
         {
             Header = "Тип (оценка)",
@@ -130,6 +140,30 @@ public partial class MainWindow
                 candidate.IsExtended,
                 out var info)
                 ? info.SourceAddressText
+                : "—";
+
+        public object ConvertBack(
+            object value,
+            Type targetType,
+            object parameter,
+            CultureInfo culture) => Binding.DoNothing;
+    }
+
+    private sealed class CandidateDestinationAddressConverter : IValueConverter
+    {
+        public static CandidateDestinationAddressConverter Instance { get; } = new();
+
+        public object Convert(
+            object value,
+            Type targetType,
+            object parameter,
+            CultureInfo culture) =>
+            value is GuidedCandidate candidate &&
+            CandidateProtocolHints.TryDecodeJ1939(
+                candidate.Id,
+                candidate.IsExtended,
+                out var info)
+                ? info.DestinationAddressText
                 : "—";
 
         public object ConvertBack(

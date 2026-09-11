@@ -13,6 +13,14 @@ public sealed record J1939IdentifierInfo(
         : $"0x{Pgn:X5}";
 
     public string SourceAddressText => $"0x{SourceAddress:X2}";
+
+    public byte? DestinationAddress => PduFormat < 0xF0
+        ? PduSpecific
+        : null;
+
+    public string DestinationAddressText => DestinationAddress.HasValue
+        ? $"0x{DestinationAddress.Value:X2}"
+        : "—";
 }
 
 /// <summary>

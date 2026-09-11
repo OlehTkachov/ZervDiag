@@ -12,30 +12,42 @@ internal static class CandidateProtocolHintsTests
         Require(
             CandidateProtocolHints.TryDecodeJ1939(0x0CF00400, true, out var eec1) &&
             eec1.Pgn == 0xF004 &&
-            eec1.SourceAddress == 0x00,
-            "J1939 EEC1 PGN/SA decoding failed.");
+            eec1.SourceAddress == 0x00 &&
+            eec1.DestinationAddress is null,
+            "J1939 EEC1 PGN/SA/DA decoding failed.");
 
         Require(
             CandidateProtocolHints.TryDecodeJ1939(0x18FEEF00, true, out var feef) &&
             feef.Pgn == 0xFEEF &&
-            feef.SourceAddress == 0x00,
-            "J1939 FEEF PGN/SA decoding failed.");
+            feef.SourceAddress == 0x00 &&
+            feef.DestinationAddress is null,
+            "J1939 FEEF PGN/SA/DA decoding failed.");
 
         Require(
             CandidateProtocolHints.TryDecodeJ1939(0x18FE2120, true, out var fe21) &&
             fe21.Pgn == 0xFE21 &&
-            fe21.SourceAddress == 0x20,
-            "J1939 FE21 PGN/SA decoding failed.");
+            fe21.SourceAddress == 0x20 &&
+            fe21.DestinationAddress is null,
+            "J1939 FE21 PDU2 decoding failed.");
+
+        Require(
+            CandidateProtocolHints.TryDecodeJ1939(0x18EF2120, true, out var proprietaryA) &&
+            proprietaryA.Pgn == 0xEF00 &&
+            proprietaryA.SourceAddress == 0x20 &&
+            proprietaryA.DestinationAddress == 0x21 &&
+            proprietaryA.DestinationAddressText == "0x21",
+            "J1939 PDU1 PGN/SA/DA decoding failed for 18EF2120.");
 
         Require(
             CandidateProtocolHints.TryDecodeJ1939(0x18EAFF80, true, out var request) &&
             request.Pgn == 0xEA00 &&
-            request.SourceAddress == 0x80,
-            "J1939 PDU1 destination must not be included in PGN.");
+            request.SourceAddress == 0x80 &&
+            request.DestinationAddress == 0xFF,
+            "J1939 PDU1 destination must not be included in PGN and must be exposed as DA.");
 
         Require(
             !CandidateProtocolHints.TryDecodeJ1939(0x123, false, out _),
-            "Standard CAN ID must not be presented as J1939 PGN/SA.");
+            "Standard CAN ID must not be presented as J1939 PGN/SA/DA.");
 
         Require(
             CandidateProtocolHints.Classify(new GuidedCandidate
