@@ -35,8 +35,15 @@ public static class PassiveNetworkDiscoveryAnalyzer
         var events = new List<NetworkEvent>();
         var flows = J1939FlowAnalyzer.Build(frames, events);
         var nodes = new List<NetworkNodeSnapshot>();
-        nodes.AddRange(J1939NodeAnalyzer.Build(frames, streams, protocol, events));
-        nodes.AddRange(CanopenNodeAnalyzer.Build(frames, streams, protocol, events));
+
+        if (protocol.Estimate is NetworkProtocolEstimate.J1939Likely or NetworkProtocolEstimate.MixedOrGateway)
+            nodes.AddRange(J1939NodeAnalyzer.Build(frames, streams, protocol, events));
+        else
+            nodes.AddRange(GenericExtendedNodeAnalyzer.Build(frames));
+
+        if (protocol.Estimate is NetworkProtocolEstimate.CanopenLikely or NetworkProtocolEstimate.MixedOrGateway)
+            nodes.AddRange(CanopenNodeAnalyzer.Build(frames, streams, protocol, events));
+
         events.AddRange(NetworkGapEventAnalyzer.Build(frames, streams, frames[^1].Timestamp));
 
         return new CanNetworkSnapshot
