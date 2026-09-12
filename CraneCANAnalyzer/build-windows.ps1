@@ -9,6 +9,8 @@ $publishedReadme = Join-Path $publishDirectory "README.md"
 $publishedFieldGuide = Join-Path $publishDirectory "docs\SOOSAN_FIELD_CAPTURE.md"
 $publishedGuidedGuide = Join-Path $publishDirectory "docs\GENERIC_GUIDED_DIAGNOSTICS.md"
 $publishedLiveGuide = Join-Path $publishDirectory "docs\LIVE_GUIDED_DIAGNOSTICS.md"
+$publishedNetworkGuide = Join-Path $publishDirectory "docs\CAN_NETWORK_DISCOVERY.md"
+$publishedNetworkSpec = Join-Path $publishDirectory "docs\CAN_NETWORK_DISCOVERY_SPEC.md"
 $publishedFixture = Join-Path $publishDirectory "samples\soosan_mixed.trc"
 $publishedLiveFixture = Join-Path $publishDirectory "samples\live_guided_demo.trc"
 
@@ -31,7 +33,7 @@ if (-not $sdkVersion.StartsWith("8.")) {
 }
 Write-Host ".NET SDK found: $sdkVersion"
 
-Write-Host "Restoring, building and running all smoke tests (ONK + Generic + Live Guided)..."
+Write-Host "Restoring, building and running all smoke tests (ONK + Generic + Live Guided + Network Discovery)..."
 & dotnet restore $smokeProject
 Assert-DotNetSuccess "Smoke-test restore"
 & dotnet build $smokeProject -c Release --no-restore
@@ -75,6 +77,12 @@ if (-not (Test-Path -LiteralPath $publishedGuidedGuide)) {
 if (-not (Test-Path -LiteralPath $publishedLiveGuide)) {
     throw "Live Guided operator guide was not copied to the publish directory: $publishedLiveGuide"
 }
+if (-not (Test-Path -LiteralPath $publishedNetworkGuide)) {
+    throw "Network discovery guide was not copied to the publish directory: $publishedNetworkGuide"
+}
+if (-not (Test-Path -LiteralPath $publishedNetworkSpec)) {
+    throw "Network discovery specification was not copied to the publish directory: $publishedNetworkSpec"
+}
 if (-not (Test-Path -LiteralPath $publishedFixture)) {
     throw "SOOSAN control TRC was not copied to the publish directory: $publishedFixture"
 }
@@ -89,6 +97,6 @@ Set-Content -LiteralPath (Join-Path $publishDirectory "SHA256SUMS.txt") -Value $
 Write-Host ""
 Write-Host "READY: $publishDirectory" -ForegroundColor Green
 Write-Host "Run: CraneCAN.Live.exe"
-Write-Host "Read first: README.md and docs\LIVE_GUIDED_DIAGNOSTICS.md"
+Write-Host "Read first: README.md, docs\LIVE_GUIDED_DIAGNOSTICS.md and docs\CAN_NETWORK_DISCOVERY.md"
 Write-Host "The target PC does not need .NET Runtime. Copy the entire publish folder."
 Write-Host "Start with samples\live_guided_demo.trc in Replay. Live PCAN is receive-only."
