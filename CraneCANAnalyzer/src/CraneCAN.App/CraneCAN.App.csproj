@@ -54,6 +54,18 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <TargetPath>docs\LIVE_GUIDED_DIAGNOSTICS.md</TargetPath>
     </Content>
+    <Content Include="..\..\docs\CAN_NETWORK_DISCOVERY.md">
+      <Link>docs\CAN_NETWORK_DISCOVERY.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\CAN_NETWORK_DISCOVERY.md</TargetPath>
+    </Content>
+    <Content Include="..\..\docs\CAN_NETWORK_DISCOVERY_SPEC.md">
+      <Link>docs\CAN_NETWORK_DISCOVERY_SPEC.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\CAN_NETWORK_DISCOVERY_SPEC.md</TargetPath>
+    </Content>
     <Content Include="..\..\docs\HC4900_PROFILE.md">
       <Link>docs\HC4900_PROFILE.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
