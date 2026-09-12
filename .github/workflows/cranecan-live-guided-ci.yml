@@ -33,3 +33,7 @@ jobs:
 
       - name: Build WPF application
         run: dotnet build src/CraneCAN.App/CraneCAN.App.csproj -c Release
+
+      - name: Verify full self-contained Windows publish
+        shell: pwsh
+        run: ./build-windows.ps1
