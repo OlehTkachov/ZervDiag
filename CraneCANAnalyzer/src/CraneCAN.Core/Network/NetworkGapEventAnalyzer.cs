@@ -7,7 +7,8 @@ internal static class NetworkGapEventAnalyzer
     public static IEnumerable<NetworkEvent> Build(
         IReadOnlyList<CanFrame> frames,
         IReadOnlyList<NetworkPeriodicStreamSnapshot> streams,
-        DateTimeOffset captureEnd)
+        DateTimeOffset captureEnd,
+        NetworkProtocolEstimate protocolEstimate)
     {
         foreach (var stream in streams.Where(s => s.IsPeriodic && s.TimeoutMilliseconds.HasValue))
         {
@@ -18,7 +19,7 @@ internal static class NetworkGapEventAnalyzer
             if (ordered.Length < 4) continue;
 
             var timeout = stream.TimeoutMilliseconds!.Value;
-            var nodeKey = GetNodeKey(stream);
+            var nodeKey = GetNodeKey(stream, protocolEstimate);
             for (var i = 1; i < ordered.Length; i++)
             {
                 var gap = (ordered[i].Timestamp - ordered[i - 1].Timestamp).TotalMilliseconds;
@@ -64,11 +65,12 @@ internal static class NetworkGapEventAnalyzer
         Description = description
     };
 
-    private static string GetNodeKey(NetworkPeriodicStreamSnapshot stream)
+    private static string GetNodeKey(NetworkPeriodicStreamSnapshot stream, NetworkProtocolEstimate protocolEstimate)
     {
         if (stream.IsCanopenHeartbeat && stream.CanopenNodeId.HasValue)
             return $"CANOPEN:{stream.CanopenNodeId.Value:X2}";
-        if (stream.SourceAddress.HasValue)
+        if (stream.SourceAddress.HasValue &&
+            protocolEstimate is NetworkProtocolEstimate.J1939Likely or NetworkProtocolEstimate.MixedOrGateway)
             return $"J1939:{stream.SourceAddress.Value:X2}";
         return $"CAN:{(stream.IsExtended ? stream.Id.ToString("X8") : stream.Id.ToString("X3"))}";
     }
