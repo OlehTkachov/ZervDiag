@@ -26,18 +26,36 @@ internal static class NetworkPeriodicityAnalyzer
 
             if (intervals.Count >= 3)
             {
-                avg = intervals.Average();
                 var sorted = intervals.OrderBy(value => value).ToArray();
                 median = GetMedian(sorted);
                 min = sorted[0];
                 max = sorted[^1];
-                jitter = median > 0 ? (max.Value - min.Value) / median.Value * 100.0 : 0;
-                periodic = median > 0 && jitter <= 50.0;
-                var observation = ordered[^1].Timestamp - ordered[0].Timestamp;
-                confident = periodic &&
-                    ((observation >= TimeSpan.FromSeconds(10) && ordered.Length >= 10) ||
-                     (heartbeat && ordered.Length >= 4 && jitter <= 35.0));
-                timeout = Math.Max(heartbeat ? 250.0 : 500.0, median.Value * 3.0);
+
+                if (median > 0)
+                {
+                    var core = intervals
+                        .Where(value => Math.Abs(value - median.Value) / median.Value <= 0.35)
+                        .OrderBy(value => value)
+                        .ToArray();
+                    var agreement = (double)core.Length / intervals.Count;
+                    if (core.Length > 0)
+                    {
+                        avg = core.Average();
+                        jitter = (core[^1] - core[0]) / median.Value * 100.0;
+                    }
+                    else
+                    {
+                        avg = intervals.Average();
+                        jitter = double.PositiveInfinity;
+                    }
+
+                    periodic = core.Length >= 3 && agreement >= 0.70 && jitter <= 50.0;
+                    var observation = ordered[^1].Timestamp - ordered[0].Timestamp;
+                    confident = periodic &&
+                        ((observation >= TimeSpan.FromSeconds(10) && ordered.Length >= 10) ||
+                         (heartbeat && ordered.Length >= 4 && agreement >= 0.75));
+                    timeout = Math.Max(heartbeat ? 250.0 : 500.0, median.Value * 3.0);
+                }
             }
 
             byte? sa = null;
@@ -57,7 +75,7 @@ internal static class NetworkPeriodicityAnalyzer
                 MaximumPeriodMilliseconds = max,
                 JitterPercent = jitter,
                 TimeoutMilliseconds = timeout,
-                ExpectedNextFrame = avg.HasValue ? ordered[^1].Timestamp.AddMilliseconds(avg.Value) : null,
+                ExpectedNextFrame = median.HasValue ? ordered[^1].Timestamp.AddMilliseconds(median.Value) : null,
                 IsPeriodic = periodic,
                 IsConfidentPeriodic = confident,
                 IsCanopenHeartbeat = heartbeat,
