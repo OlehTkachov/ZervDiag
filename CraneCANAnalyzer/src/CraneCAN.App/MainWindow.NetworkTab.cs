@@ -88,6 +88,10 @@ public partial class MainWindow
         compare.Click += CompareNetworkSnapshotsButton_Click;
         toolbar.Children.Add(compare);
 
+        var incident = NetworkButton("Сеть incident…", "Пассивно сравнить сеть до и после marker в сохранённом .canincident.");
+        incident.Click += AnalyzeIncidentNetworkButton_Click;
+        toolbar.Children.Add(incident);
+
         _networkProfileButton = NetworkButton("Добавить сеть в профиль", "Сохранить автоматически наблюдённые узлы и потоки в Machine Profile, не перезаписывая документированные данные.");
         _networkProfileButton.IsEnabled = false;
         _networkProfileButton.Click += SaveNetworkToProfileButton_Click;
