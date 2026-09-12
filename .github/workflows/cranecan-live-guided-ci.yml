@@ -1,5 +1,6 @@
 name: CraneCAN Live Guided CI
 
+# Windows gate for receive-only Live Guided and passive network discovery.
 on:
   push:
     branches:
