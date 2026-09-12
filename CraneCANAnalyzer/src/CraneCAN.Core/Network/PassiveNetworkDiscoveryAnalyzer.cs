@@ -49,7 +49,7 @@ public static class PassiveNetworkDiscoveryAnalyzer
         if (protocol.Estimate is NetworkProtocolEstimate.CanopenLikely or NetworkProtocolEstimate.MixedOrGateway)
             nodes.AddRange(CanopenNodeAnalyzer.Build(frames, streams, protocol, events));
 
-        events.AddRange(NetworkGapEventAnalyzer.Build(frames, streams, frames[^1].Timestamp));
+        events.AddRange(NetworkGapEventAnalyzer.Build(frames, streams, frames[^1].Timestamp, protocol.Estimate));
 
         return new CanNetworkSnapshot
         {
