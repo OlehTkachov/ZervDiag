@@ -2,10 +2,15 @@ using CraneCAN.Core.Models;
 
 namespace CraneCAN.Core.Network;
 
-internal static class J1939NodeAnalyzer
+internal static partial class J1939NodeAnalyzer
 {
-    public static IReadOnlyList<NetworkNodeSnapshot> Build(IReadOnlyList<CanFrame> frames)
+    public static IReadOnlyList<NetworkNodeSnapshot> Build(
+        IReadOnlyList<CanFrame> frames,
+        IReadOnlyList<NetworkPeriodicStreamSnapshot> streams,
+        NetworkProtocolEstimateResult protocol,
+        ICollection<NetworkEvent> events)
     {
-        return Array.Empty<NetworkNodeSnapshot>();
+        var groups = J1939NodeGrouping.Group(frames);
+        return groups.Select(group => CreateNode(group, frames[^1].Timestamp, streams, protocol, events)).ToArray();
     }
 }
