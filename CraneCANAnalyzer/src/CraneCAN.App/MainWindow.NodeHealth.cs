@@ -12,10 +12,11 @@ public partial class MainWindow
         if (!ReferenceEquals(receiver, _liveReceiver)) return;
 
         var id = healthEvent.IsExtended ? $"0x{healthEvent.Id:X8} EXT" : $"0x{healthEvent.Id:X3} STD";
+        var protocolContext = DescribeNodeHealthProtocolContext(receiver, healthEvent);
         _nodeHealthLastEventText = healthEvent.Kind == NodeHealthEventKind.Timeout
             ? $"Таймаут {id}: последний кадр {healthEvent.LastSeen.ToLocalTime():HH:mm:ss.fff}, " +
-              $"ожидался период ≈ {healthEvent.ExpectedPeriod.TotalMilliseconds:0.###} мс."
-            : $"Восстановление {id}: поток сообщений снова появился.";
+              $"ожидался период ≈ {healthEvent.ExpectedPeriod.TotalMilliseconds:0.###} мс.{protocolContext}"
+            : $"Восстановление {id}: поток сообщений снова появился.{protocolContext}";
 
         if (healthEvent.Kind == NodeHealthEventKind.Timeout &&
             NodeHealthAutoTriggerCheckBox.IsChecked == true)
@@ -47,7 +48,7 @@ public partial class MainWindow
             {
                 receiver.Incidents.MarkAt(
                     healthEvent.DetectedAt,
-                    $"AUTO NODE HEALTH · {id} · timeout {healthEvent.Timeout.TotalMilliseconds:0.###} ms");
+                    $"AUTO NODE HEALTH · {id} · timeout {healthEvent.Timeout.TotalMilliseconds:0.###} ms{protocolContext}");
                 _nodeHealthLastEventText +=
                     active ? " Отметка добавлена в активный incident." : " Автоматическая запись −10 / +5 с запущена.";
                 UpdateIncidentDisplay();
