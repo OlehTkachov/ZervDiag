@@ -62,6 +62,7 @@ public sealed record MachineProfile
     public List<MachineSignal> KnownSignals { get; init; } = [];
     public List<MachineSignal> ExperimentalSignals { get; init; } = [];
     public List<RejectedCandidate> RejectedCandidates { get; init; } = [];
+    public MachineNetworkKnowledge? Network { get; init; }
     public string Notes { get; init; } = string.Empty;
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
