@@ -75,6 +75,12 @@ public partial class MainWindow
         analyze.Click += AnalyzeNetworkButton_Click;
         toolbar.Children.Add(analyze);
 
+        var pcan = NetworkButton(
+            "Проверить PCAN / Live CAN",
+            "Найти PCAN-USB, пассивно определить bitrate по реальным кадрам и подключить Live-приём в LISTEN ONLY.");
+        pcan.Click += DiagnosePcanLiveButton_Click;
+        toolbar.Children.Add(pcan);
+
         _networkSaveButton = NetworkButton("Сохранить .cannetwork…", "Сохранить пассивный снимок сети.");
         _networkSaveButton.IsEnabled = false;
         _networkSaveButton.Click += SaveNetworkSnapshotButton_Click;
