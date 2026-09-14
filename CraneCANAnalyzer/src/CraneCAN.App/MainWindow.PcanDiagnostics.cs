@@ -81,6 +81,7 @@ public partial class MainWindow
 
             // Reuse the normal Live connection path after the passive probe. It opens the same channel
             // in hardware LISTEN ONLY and starts the continuous receiver/raw capture.
+            MainTabs.SelectedIndex = 0;
             LiveConnectButton_Click(this, new RoutedEventArgs());
         }
         catch (Exception exception)
