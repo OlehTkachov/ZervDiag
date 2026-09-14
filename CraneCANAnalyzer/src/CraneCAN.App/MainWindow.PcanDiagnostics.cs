@@ -24,8 +24,9 @@ public partial class MainWindow
         }
 
         _pcanDiagnosticBusy = true;
-        if (sender is FrameworkElement element)
-            element.IsEnabled = false;
+        var sourceElement = sender as FrameworkElement;
+        if (sourceElement is not null)
+            sourceElement.IsEnabled = false;
 
         try
         {
@@ -91,8 +92,8 @@ public partial class MainWindow
         finally
         {
             _pcanDiagnosticBusy = false;
-            if (sender is FrameworkElement element)
-                element.IsEnabled = true;
+            if (sourceElement is not null)
+                sourceElement.IsEnabled = true;
         }
     }
 
