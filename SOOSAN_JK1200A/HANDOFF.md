@@ -2,7 +2,9 @@
 
 ## Current status
 
-As of **2026-09-16**, the crane was started and the boom configuration was **trained manually**. The previous automatic `Reset HYDAC length sensor` / `boResetBoomConf` blocker is historical, not the current operating blocker.
+As of **2026-09-16**, the crane was started and the boom configuration was successfully restored by **manual training of every telescopic section**. The actual field procedure was a sequential pass through the sections, performing the required **PIN / UNPIN and LOCK / UNLOCK operations for each section** so that the controller could learn/reconstruct the section states. After this per-section manual training the crane became operational.
+
+Therefore the previous automatic `Reset HYDAC length sensor` / `boResetBoomConf` blocker is **historical diagnostic context**, not the current operating blocker. Any future analysis must preserve this distinction.
 
 ## Machine / CAN
 
@@ -18,6 +20,12 @@ Before manual training, boom/SVE NVM configuration was UNDEF/0xFFFFFFFF. CSM cou
 
 Key corrections/findings: `i16pAccuMin` raw 70 = 7.0 bar; raw 700 = 70.0 bar. Successful LPU charge to ~85.3 bar was captured. `i16CylLengthLimitLower=-32000` was already present and was not the cause. Screen 45% after manual zeroing was not physical boom movement.
 
+### What finally worked
+
+The recovery did **not** require obtaining the four-digit Reset PIN. The working field solution was manual teaching of the telescopic mechanism: go through the boom sections one after another and execute/confirm the corresponding PIN/UNPIN and LOCK/UNLOCK states for every section. This restored a coherent learned configuration and allowed normal crane startup/operation.
+
+For a future engineer this is the most important final-state correction to the earlier reports: do not treat the automatic Reset access problem as still unresolved if diagnosing the now-trained machine.
+
 ## swing_err.trc
 
 - 155,485 frames; ~322.645 s; 104 IDs.
@@ -26,7 +34,7 @@ Key corrections/findings: `i16pAccuMin` raw 70 = 7.0 bar; raw 700 = 70.0 bar. Su
 
 ## Trace archive
 
-The accompanying archive `SOOSAN_JK1200A_TRC_ARCHIVE_2026-09-16.zip` contains all 18 raw TRC files plus `SHA256SUMS.txt` and `trace_manifest.json`. The branch stores the manifest and reconstruction metadata for the archive.
+The companion trace archive contains all 18 raw TRC files. `SHA256SUMS.txt` and `trace_manifest.json` in this branch are the integrity/index layer.
 
 | File | Bytes | SHA-256 | Purpose |
 |---|---:|---|---|
@@ -69,7 +77,7 @@ The accompanying archive `SOOSAN_JK1200A_TRC_ARCHIVE_2026-09-16.zip` contains al
 - Do not treat 45% display as physical movement.
 - Do not reproduce faults by disconnecting the monitor.
 - Do not inject guessed reset frames or force Y060/Y061.
-- Do not continue treating the old automatic Reset blocker as unresolved: the boom was manually trained and the crane started on 2026-09-16.
+- Do not continue treating the old automatic Reset blocker as unresolved: manual per-section PIN/UNPIN + LOCK/UNLOCK training restored the configuration and the crane started on 2026-09-16.
 
 ## Best next evidence
 
