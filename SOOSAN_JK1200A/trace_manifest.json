@@ -1,0 +1,20 @@
+[
+  {"name":"69f87dcc-21d2-427b-958d-700901782245.trc","size_bytes":817066,"sha256":"fb84aea45618cdecaf73a19f00a2732e6216e8658abbeefffb5d384f36a5c110"},
+  {"name":"9a63f3f1-61ec-4c61-81c8-f014f8f133ba.trc","size_bytes":2741147,"sha256":"52cb24395546f0bea2066e0bbbcd2b040f17149dc7c8fdaf0688d7e9efc987b5"},
+  {"name":"JK1200A_ACH1_intercontroller.trc","size_bytes":583406,"sha256":"65cb048da4996d7b66205f170115e4b61ce5a2f774b7176ce1a9d4c5e118fc81"},
+  {"name":"JK1200A_ACH3_LMB.trc","size_bytes":762606,"sha256":"db7f818a5ae1eba37d580469b39569a8d8986eeb7ba0f90d04c3afd25c971840"},
+  {"name":"JK1200A_HCH2_HYDAC.trc","size_bytes":2209867,"sha256":"bc0515926bbe387a524312e922f7772e256926b1f47464d619f3823edf1bdcdc"},
+  {"name":"JK1200A_JCH4_joystick.trc","size_bytes":635468,"sha256":"85579293e7a39e564b9f240cc9ecfe1cda3f6c05c0a4c9124c5b86fa0d11cba3"},
+  {"name":"JK1200A_auto_tele_2026-08-28(1).trc","size_bytes":316983,"sha256":"9a61f7d4fbfc3cb4e2a8ad7590d4cc5f8128cd8b5241245d52345c18cca9b2f7"},
+  {"name":"JK1200A_auto_tele_2026-08-28.trc","size_bytes":718420,"sha256":"9fcfdaa4e2efdf9c06b8063095502f355e06037aabfdc9960da9fb892140bc1b"},
+  {"name":"capture(1).trc","size_bytes":1407,"sha256":"18df5cd3fe351e1f0145aa88bf46ae30e99339accd9eaf35bc3c7848c0811fa6"},
+  {"name":"capture(2).trc","size_bytes":1603,"sha256":"209b5f25c8df34a78678e763a94fec34ae537473f5660e5963750a0ea43cc4bb"},
+  {"name":"capture(3).trc","size_bytes":1707,"sha256":"b9b31b4d69d5e8814203ba56ef85ffe9ff5b5d824ec5c3fc23bc69f25717f978"},
+  {"name":"capture.trc","size_bytes":1407,"sha256":"18df5cd3fe351e1f0145aa88bf46ae30e99339accd9eaf35bc3c7848c0811fa6"},
+  {"name":"charge acc lpu.trc","size_bytes":3602251,"sha256":"dc07a9de2a0fdf696ee15a4d2465ceb89293c9de9f9a3c79fe25cf8eb27119c2"},
+  {"name":"charge acc lpu1.trc","size_bytes":1906005,"sha256":"0e4e94dfa9472a82eaa1f4291e08b04dc7f7bc287e3a1406405db5a017a1ec70"},
+  {"name":"charge acc lpu2.trc","size_bytes":2181797,"sha256":"4b531510219114ef8b65ec20e0d3c26fd89404b0b3c64a35924754b257348cb5"},
+  {"name":"d0daf58e-0d98-4e66-bebe-9200f91d0f18.trc","size_bytes":1603,"sha256":"209b5f25c8df34a78678e763a94fec34ae537473f5660e5963750a0ea43cc4bb"},
+  {"name":"e819f832-014e-41da-abf9-e02a61b64c31.trc","size_bytes":1809911,"sha256":"82367b72027d82b99ff95ff861c55a289cf68c505c5a53ef2aa6ca5c1e977be9"},
+  {"name":"swing_err.trc","size_bytes":10289108,"sha256":"61e5f4fa7d59eaa883b5c297c72f9d584390455632a87b28075fe834a8e29677"}
+]
