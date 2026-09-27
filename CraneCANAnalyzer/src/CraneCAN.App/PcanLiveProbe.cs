@@ -10,7 +10,8 @@ internal sealed record PcanPassiveProbeAttempt(
     long ErrorFrames,
     long LostFrames,
     string Status,
-    string? Failure = null);
+    string? Failure = null,
+    IReadOnlyList<PcanOperationDiagnostic>? Diagnostics = null);
 
 internal sealed record PcanPassiveProbeReport(
     int? DetectedBitrate,
@@ -37,6 +38,23 @@ internal sealed record PcanPassiveProbeReport(
         var failure = Attempts.Select(item => item.Failure).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
         return failure ?? "PCAN-канал не удалось проверить.";
     }
+
+    public string DescribeDetailed()
+    {
+        var lines = new List<string>();
+        foreach (var attempt in Attempts)
+        {
+            var outcome = attempt.Failure is null
+                ? $"frames={attempt.Frames:N0}, lost={attempt.LostFrames:N0}, errors={attempt.ErrorFrames:N0}, {attempt.Status}"
+                : $"OPEN/READ FAILED: {attempt.Failure}";
+            lines.Add($"{attempt.Bitrate:N0} bit/s — {outcome}");
+
+            foreach (var item in attempt.Diagnostics ?? Array.Empty<PcanOperationDiagnostic>())
+                lines.Add($"    {item.Operation}: {item.StatusText}");
+        }
+
+        return lines.Count == 0 ? "Попытки PCAN не выполнялись." : string.Join(Environment.NewLine, lines);
+    }
 }
 
 internal static class PcanLiveProbe
@@ -59,7 +77,7 @@ internal static class PcanLiveProbe
         if (string.IsNullOrWhiteSpace(channelId))
             throw new ArgumentException("PCAN channel id is required.", nameof(channelId));
 
-        var duration = dwell ?? TimeSpan.FromMilliseconds(350);
+        var duration = dwell ?? TimeSpan.FromSeconds(2);
         if (duration <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(dwell));
 
@@ -102,7 +120,8 @@ internal static class PcanLiveProbe
                     Math.Max(received, status.ReceivedFrames),
                     status.ErrorFrames,
                     status.LostFrames,
-                    status.Message));
+                    status.Message,
+                    Diagnostics: driver.GetOperationDiagnostics()));
 
                 if (received > 0 || status.ReceivedFrames > 0)
                     return new PcanPassiveProbeReport(bitrate, attempts);
@@ -114,7 +133,8 @@ internal static class PcanLiveProbe
             catch (Exception exception)
             {
                 attempts.Add(new PcanPassiveProbeAttempt(
-                    bitrate, 0, 0, 0, "OPEN FAILED", exception.Message));
+                    bitrate, 0, 0, 0, "OPEN/READ FAILED", exception.Message,
+                    driver.GetOperationDiagnostics()));
             }
         }
 

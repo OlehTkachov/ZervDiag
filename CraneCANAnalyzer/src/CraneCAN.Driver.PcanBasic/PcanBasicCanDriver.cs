@@ -4,14 +4,24 @@ using CraneCAN.Core.Models;
 
 namespace CraneCAN.Driver.PcanBasic;
 
+public sealed record PcanOperationDiagnostic(
+    DateTimeOffset Timestamp,
+    string Operation,
+    uint RawStatus,
+    string StatusText);
+
 /// <summary>Receive-only Classical CAN driver. The assembly exposes no transmit API.</summary>
 public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
 {
     private readonly object _sync = new();
+    private readonly Queue<PcanOperationDiagnostic> _diagnostics = new();
+    private const int DiagnosticCapacity = 128;
     private ushort _handle;
     private int _channelIndex;
     private bool _open;
     private bool _listenOnly;
+    private bool _readOkLogged;
+    private PcanStatus? _lastGetStatus;
     private long _received;
     private long _lost;
     private long _errors;
@@ -29,14 +39,26 @@ public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
         EnsureWindows();
         try
         {
-            IReadOnlyList<CanChannelDescriptor> channels = PcanBasicNative.UsbHandles
-                .Select((handle, index) => (handle, index, status: PcanBasicNative.GetValue(
-                    handle, PcanParameter.ChannelCondition, out var condition, sizeof(uint)), condition))
-                .Where(item => item.status == PcanStatus.Ok && item.condition != 0)
-                .Select(item => new CanChannelDescriptor(FormatChannelId(item.handle),
-                    $"PCAN-USB Channel {item.index + 1} — {DescribeCondition(item.condition)}"))
-                .ToArray();
-            return Task.FromResult(channels);
+            var channels = new List<CanChannelDescriptor>();
+            for (var index = 0; index < PcanBasicNative.UsbHandles.Length; index++)
+            {
+                var handle = PcanBasicNative.UsbHandles[index];
+                var status = PcanBasicNative.GetValue(
+                    handle, PcanParameter.ChannelCondition, out var condition, sizeof(uint));
+                RecordOperation(
+                    $"CAN_GetValue(ChannelCondition, {FormatChannelId(handle)})",
+                    status,
+                    status == PcanStatus.Ok ? $"condition={condition} ({DescribeCondition(condition)})" : null);
+
+                if (status != PcanStatus.Ok || !IsConnectableChannelCondition(condition))
+                    continue;
+
+                channels.Add(new CanChannelDescriptor(
+                    FormatChannelId(handle),
+                    $"PCAN-USB Channel {index + 1} — {DescribeCondition(condition)}"));
+            }
+
+            return Task.FromResult<IReadOnlyList<CanChannelDescriptor>>(channels);
         }
         catch (Exception ex) when (NativeFailure(ex)) { throw NativeLoadError(ex); }
     }
@@ -50,29 +72,49 @@ public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
         lock (_sync)
         {
             if (_open) throw new InvalidOperationException("PCAN-канал уже открыт.");
+            _readOkLogged = false;
+            _lastGetStatus = null;
             var initialized = false;
             try
             {
                 var on = PcanBasicNative.ParameterOn;
-                Ensure(PcanBasicNative.SetValue(handle, PcanParameter.ListenOnly, ref on, sizeof(uint)),
-                    "PCAN не принял предварительный LISTEN ONLY");
-                Ensure(PcanBasicNative.Initialize(handle, bitrate, 0, 0, 0), "Не удалось открыть PCAN");
+                var listenStatus = PcanBasicNative.SetValue(
+                    handle, PcanParameter.ListenOnly, ref on, sizeof(uint));
+                RecordOperation("CAN_SetValue(ListenOnly=ON, pre-init)", listenStatus);
+                Ensure(listenStatus, "PCAN не принял предварительный LISTEN ONLY");
+
+                var initializeStatus = PcanBasicNative.Initialize(handle, bitrate, 0, 0, 0);
+                RecordOperation($"CAN_Initialize({settings.Bitrate:N0} bit/s)", initializeStatus);
+                Ensure(initializeStatus, "Не удалось открыть PCAN");
                 initialized = true;
-                var status = PcanBasicNative.GetValue(handle, PcanParameter.ListenOnly, out var confirmed, sizeof(uint));
-                if (status != PcanStatus.Ok || confirmed != PcanBasicNative.ParameterOn)
-                    throw new InvalidOperationException("Аппаратный LISTEN ONLY не подтверждён. Канал закрыт.");
+
+                var verifyStatus = PcanBasicNative.GetValue(
+                    handle, PcanParameter.ListenOnly, out var confirmed, sizeof(uint));
+                RecordOperation("CAN_GetValue(ListenOnly)", verifyStatus, $"value={confirmed}");
+                if (verifyStatus != PcanStatus.Ok || confirmed != PcanBasicNative.ParameterOn)
+                    throw new InvalidOperationException(
+                        $"Аппаратный LISTEN ONLY не подтверждён. Канал закрыт. " +
+                        $"GetValue={PcanBasicNative.Describe(verifyStatus)}, value={confirmed}.");
+
                 Configure(handle, PcanParameter.ReceiveStatus, true);
                 Configure(handle, PcanParameter.AllowStatusFrames, true);
                 Configure(handle, PcanParameter.AllowRemoteFrames, false);
                 Configure(handle, PcanParameter.AllowEchoFrames, false);
                 Configure(handle, PcanParameter.AllowErrorFrames, settings.IncludeErrorFrames);
-                _handle = handle; _channelIndex = Array.IndexOf(PcanBasicNative.UsbHandles, handle);
-                _received = _lost = _errors = 0; _listenOnly = true; _open = true;
+                _handle = handle;
+                _channelIndex = Array.IndexOf(PcanBasicNative.UsbHandles, handle);
+                _received = _lost = _errors = 0;
+                _listenOnly = true;
+                _open = true;
                 _message = "CONNECTED — LISTEN ONLY";
             }
             catch (Exception ex)
             {
-                if (initialized) PcanBasicNative.Uninitialize(handle);
+                if (initialized)
+                {
+                    var cleanupStatus = PcanBasicNative.Uninitialize(handle);
+                    RecordOperation("CAN_Uninitialize(cleanup after open failure)", cleanupStatus);
+                }
                 if (NativeFailure(ex)) throw NativeLoadError(ex);
                 throw;
             }
@@ -90,35 +132,81 @@ public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
             PcanStatus status; PcanMessage message; PcanTimestamp timestamp;
             try { status = PcanBasicNative.Read(handle, out message, out timestamp); }
             catch (Exception ex) when (NativeFailure(ex)) { throw NativeLoadError(ex); }
+
+            if (status == PcanStatus.Ok && !_readOkLogged)
+            {
+                _readOkLogged = true;
+                RecordOperation("CAN_Read(first successful result)", status);
+            }
+
             if ((status & PcanStatus.ReceiveQueueEmpty) != 0)
             {
                 var other = status & ~PcanStatus.ReceiveQueueEmpty;
-                if (other != PcanStatus.Ok) RecordStatus(other);
-                await Task.Delay(2, cancellationToken).ConfigureAwait(false); continue;
-            }
-            if (status != PcanStatus.Ok)
-            {
-                RecordStatus(status);
-                if (Fatal(status)) throw new IOException($"PCAN перестал принимать: {PcanBasicNative.Describe(status)}");
+                if (other != PcanStatus.Ok)
+                {
+                    RecordOperation("CAN_Read", other);
+                    RecordStatus(other);
+                    if (Fatal(other))
+                        throw new IOException($"PCAN перестал принимать: {PcanBasicNative.Describe(other)}");
+                }
+                await Task.Delay(2, cancellationToken).ConfigureAwait(false);
                 continue;
             }
-            if ((message.Type & (PcanMessageType.ErrorFrame | PcanMessageType.Status)) != 0) { Interlocked.Increment(ref _errors); continue; }
-            if ((message.Type & (PcanMessageType.Remote | PcanMessageType.Fd | PcanMessageType.Echo)) != 0 || message.Length > 8) continue;
+
+            if (status != PcanStatus.Ok)
+            {
+                RecordOperation("CAN_Read", status);
+                RecordStatus(status);
+                if (Fatal(status))
+                    throw new IOException($"PCAN перестал принимать: {PcanBasicNative.Describe(status)}");
+                await Task.Delay(2, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if ((message.Type & (PcanMessageType.ErrorFrame | PcanMessageType.Status)) != 0)
+            {
+                Interlocked.Increment(ref _errors);
+                continue;
+            }
+            if ((message.Type & (PcanMessageType.Remote | PcanMessageType.Fd | PcanMessageType.Echo)) != 0 || message.Length > 8)
+                continue;
+
             firstDevice ??= timestamp.TotalMicroseconds;
             var relative = timestamp.TotalMicroseconds >= firstDevice.Value ? timestamp.TotalMicroseconds - firstDevice.Value : 0;
-            var frame = new CanFrame { Timestamp = firstWall.AddTicks(checked((long)relative * 10)), Channel = channel,
-                Id = message.Id, IsExtended = (message.Type & PcanMessageType.Extended) != 0,
-                Data = (message.Data ?? []).Take(message.Length).ToArray(), Protocol = BusProtocol.ClassicalCan,
-                Direction = CanDirection.Rx };
-            frame.Validate(); Interlocked.Increment(ref _received); yield return frame;
+            var frame = new CanFrame
+            {
+                Timestamp = firstWall.AddTicks(checked((long)relative * 10)),
+                Channel = channel,
+                Id = message.Id,
+                IsExtended = (message.Type & PcanMessageType.Extended) != 0,
+                Data = (message.Data ?? []).Take(message.Length).ToArray(),
+                Protocol = BusProtocol.ClassicalCan,
+                Direction = CanDirection.Rx
+            };
+            frame.Validate();
+            Interlocked.Increment(ref _received);
+            yield return frame;
         }
     }
 
     public Task CloseAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested(); ushort handle;
-        lock (_sync) { if (!_open) return Task.CompletedTask; handle = _handle; _open = false; _listenOnly = false; _message = "DISCONNECTED"; }
-        try { Ensure(PcanBasicNative.Uninitialize(handle), "Не удалось закрыть PCAN"); }
+        cancellationToken.ThrowIfCancellationRequested();
+        ushort handle;
+        lock (_sync)
+        {
+            if (!_open) return Task.CompletedTask;
+            handle = _handle;
+            _open = false;
+            _listenOnly = false;
+            _message = "DISCONNECTED";
+        }
+        try
+        {
+            var status = PcanBasicNative.Uninitialize(handle);
+            RecordOperation("CAN_Uninitialize", status);
+            Ensure(status, "Не удалось закрыть PCAN");
+        }
         catch (Exception ex) when (NativeFailure(ex)) { throw NativeLoadError(ex); }
         return Task.CompletedTask;
     }
@@ -128,10 +216,34 @@ public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
     {
         lock (_sync)
         {
-            if (_open) { var status = PcanBasicNative.GetStatus(_handle); if (status != PcanStatus.Ok) RecordStatus(status); }
-            return new CanDriverStatus(_open, _listenOnly, Interlocked.Read(ref _received),
-                Interlocked.Read(ref _lost), Interlocked.Read(ref _errors), _message);
+            if (_open)
+            {
+                var status = PcanBasicNative.GetStatus(_handle);
+                if (_lastGetStatus != status)
+                {
+                    _lastGetStatus = status;
+                    RecordOperation("CAN_GetStatus", status);
+                }
+
+                if (status != PcanStatus.Ok)
+                    RecordStatus(status, countCounters: false);
+                else
+                    _message = "CONNECTED — LISTEN ONLY";
+            }
+
+            return new CanDriverStatus(
+                _open,
+                _listenOnly,
+                Interlocked.Read(ref _received),
+                Interlocked.Read(ref _lost),
+                Interlocked.Read(ref _errors),
+                _message);
         }
+    }
+
+    public IReadOnlyList<PcanOperationDiagnostic> GetOperationDiagnostics()
+    {
+        lock (_sync) return _diagnostics.ToArray();
     }
 
     public static string FormatChannelId(ushort handle) => $"pcan-usb:{handle:X4}";
@@ -147,32 +259,75 @@ public sealed class PcanBasicCanDriver : ICanDriver, ICanDriverDiagnostics
             50_000 => 0x472F, 20_000 => 0x532F, 10_000 => 0x672F, 5_000 => 0x7F7F, _ => 0 };
         return code != 0;
     }
-    private static void Configure(ushort handle, PcanParameter parameter, bool enabled)
+
+    public static bool IsConnectableChannelCondition(uint condition) =>
+        condition is PcanBasicNative.ChannelAvailable or PcanBasicNative.ChannelPcanView;
+    private void Configure(ushort handle, PcanParameter parameter, bool enabled)
     {
         var value = enabled ? PcanBasicNative.ParameterOn : PcanBasicNative.ParameterOff;
         var status = PcanBasicNative.SetValue(handle, parameter, ref value, sizeof(uint));
-        if (status != PcanStatus.Ok) Ensure(status, $"Не удалось настроить {parameter}");
+        RecordOperation($"CAN_SetValue({parameter}={(enabled ? "ON" : "OFF")})", status);
+        Ensure(status, $"Не удалось настроить {parameter}");
     }
+
+    private void RecordOperation(string operation, PcanStatus status, string? detail = null)
+    {
+        var statusText = PcanBasicNative.Describe(status);
+        if (!string.IsNullOrWhiteSpace(detail))
+            statusText += $" · {detail}";
+
+        lock (_sync)
+        {
+            if (_diagnostics.Count >= DiagnosticCapacity)
+                _diagnostics.Dequeue();
+            _diagnostics.Enqueue(new PcanOperationDiagnostic(
+                DateTimeOffset.UtcNow, operation, (uint)status, statusText));
+        }
+    }
+
     private static string DescribeCondition(uint condition) => condition switch
     {
-        1 => "доступен",
-        2 => "занят другим клиентом",
-        3 => "PCAN-View активен",
+        PcanBasicNative.ChannelUnavailable => "недоступен",
+        PcanBasicNative.ChannelAvailable => "доступен",
+        PcanBasicNative.ChannelOccupied => "занят другим PCAN-Basic клиентом",
+        PcanBasicNative.ChannelPcanView => "PCAN-View активен; совместное подключение разрешено",
         _ => $"состояние {condition}"
     };
-    private void RecordStatus(PcanStatus status)
+
+    private void RecordStatus(PcanStatus status, bool countCounters = true)
     {
-        if ((status & (PcanStatus.Overrun | PcanStatus.ReceiveQueueOverrun)) != 0) Interlocked.Increment(ref _lost);
-        if ((status & PcanStatus.AnyBusError) != 0) Interlocked.Increment(ref _errors);
+        if (countCounters && (status & (PcanStatus.Overrun | PcanStatus.ReceiveQueueOverrun)) != 0)
+            Interlocked.Increment(ref _lost);
+        if (countCounters && (status & PcanStatus.AnyBusError) != 0)
+            Interlocked.Increment(ref _errors);
         _message = PcanBasicNative.Describe(status);
     }
-    private static bool Fatal(PcanStatus status) => (status & (PcanStatus.BusOff | PcanStatus.NoDriver |
-        PcanStatus.IllegalHardware | PcanStatus.Initialize | PcanStatus.IllegalOperation)) != 0;
+
+    private static bool HasStatus(PcanStatus status, PcanStatus flag) => (status & flag) == flag;
+
+    private static bool Fatal(PcanStatus status) =>
+        HasStatus(status, PcanStatus.BusOff) ||
+        HasStatus(status, PcanStatus.NoDriver) ||
+        HasStatus(status, PcanStatus.IllegalHardware) ||
+        HasStatus(status, PcanStatus.IllegalMode) ||
+        HasStatus(status, PcanStatus.Initialize) ||
+        HasStatus(status, PcanStatus.IllegalOperation);
+
     private static void Ensure(PcanStatus status, string operation)
-    { if (status != PcanStatus.Ok) throw new InvalidOperationException($"{operation}: {PcanBasicNative.Describe(status)}"); }
+    {
+        if (status != PcanStatus.Ok && status != PcanStatus.Caution)
+            throw new InvalidOperationException($"{operation}: {PcanBasicNative.Describe(status)}");
+    }
+
     private static void EnsureWindows()
-    { if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("PCAN-Basic доступен только в Windows. Используйте TRC Replay."); }
-    private static bool NativeFailure(Exception ex) => ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException;
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("PCAN-Basic доступен только в Windows. Используйте TRC Replay.");
+    }
+
+    private static bool NativeFailure(Exception ex) =>
+        ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException;
+
     private static InvalidOperationException NativeLoadError(Exception ex) => new(
         "PCANBasic.dll не найдена или несовместима. Установите официальный PEAK Device Driver x64.", ex);
 }

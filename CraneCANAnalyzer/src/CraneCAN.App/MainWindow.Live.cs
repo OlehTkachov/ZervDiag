@@ -69,6 +69,8 @@ public partial class MainWindow
         if (LiveReplayFileButton is null) return;
         LiveReplayFileButton.IsEnabled = IsReplaySource;
         LiveBitrateCombo.IsEnabled = !IsReplaySource;
+        if (DiagnosePcanLiveButton is not null) DiagnosePcanLiveButton.IsEnabled = !IsReplaySource;
+        if (DiagnoseKnownPcanBitrateButton is not null) DiagnoseKnownPcanBitrateButton.IsEnabled = !IsReplaySource;
         LiveChannelCombo.ItemsSource = Array.Empty<CanChannelDescriptor>();
         LiveConnectionText.Text = "DISCONNECTED";
         LiveInstructionText.Text = IsReplaySource
@@ -716,6 +718,10 @@ public partial class MainWindow
         LiveDiscoverButton.IsEnabled = !_liveConnectionReady && !active;
         LiveChannelCombo.IsEnabled = !_liveConnectionReady && !active;
         LiveBitrateCombo.IsEnabled = !IsReplaySource && !_liveConnectionReady && !active;
+        var pcanDiagnosticsEnabled = !IsReplaySource && !_liveConnectionReady && !active &&
+                                     !_liveStarting && !_pcanDiagnosticBusy;
+        DiagnosePcanLiveButton.IsEnabled = pcanDiagnosticsEnabled;
+        DiagnoseKnownPcanBitrateButton.IsEnabled = pcanDiagnosticsEnabled;
     }
 
     private void SetLiveBusy(bool busy, string? status = null)
@@ -723,6 +729,9 @@ public partial class MainWindow
         LiveConnectButton.IsEnabled = !busy;
         LiveDiscoverButton.IsEnabled = !busy;
         LiveReplayFileButton.IsEnabled = !busy && IsReplaySource;
+        var pcanDiagnosticsEnabled = !busy && !IsReplaySource && !_liveConnectionReady && !_pcanDiagnosticBusy;
+        DiagnosePcanLiveButton.IsEnabled = pcanDiagnosticsEnabled;
+        DiagnoseKnownPcanBitrateButton.IsEnabled = pcanDiagnosticsEnabled;
         if (!string.IsNullOrWhiteSpace(status)) StatusText.Text = status;
     }
 

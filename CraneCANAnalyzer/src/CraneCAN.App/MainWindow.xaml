@@ -101,6 +101,7 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Источник:" Margin="4" VerticalAlignment="Center" />
                                 <ComboBox x:Name="LiveSourceCombo" Grid.Row="0" Grid.Column="1"
@@ -115,6 +116,14 @@
                                 <ComboBox x:Name="LiveBitrateCombo" Grid.Row="1" Grid.Column="2" MinWidth="120" />
                                 <Button x:Name="LiveConnectButton" Grid.Row="1" Grid.Column="3"
                                         Content="ПОДКЛЮЧИТЬ" Click="LiveConnectButton_Click" FontWeight="Bold" />
+                                <WrapPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0">
+                                    <Button x:Name="DiagnoseKnownPcanBitrateButton"
+                                            Content="ПРОВЕРИТЬ ВЫБРАННЫЙ BITRATE"
+                                            Click="DiagnoseKnownPcanBitrateButton_Click" Margin="0,0,6,0" />
+                                    <Button x:Name="DiagnosePcanLiveButton"
+                                            Content="АВТОПОИСК BITRATE · LISTEN ONLY"
+                                            Click="DiagnosePcanLiveButton_Click" />
+                                </WrapPanel>
                             </Grid>
                         </GroupBox>
 
