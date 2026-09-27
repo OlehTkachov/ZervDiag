@@ -1,0 +1,77 @@
+name: Build CraneCAN engineer source pack
+
+on:
+  push:
+    branches:
+      - handoff/live-guided-source-pack
+
+permissions:
+  contents: read
+
+jobs:
+  source-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout handoff branch
+        uses: actions/checkout@v4
+
+      - name: Add handoff manifest
+        shell: bash
+        run: |
+          cat > CraneCANAnalyzer/ENGINEER_SOURCE_PACK_README.txt <<'EOF'
+          CraneCAN Live Guided Diagnostics — engineer source pack
+          Source repository: OlehTkachov/ZervDiag
+          Source branch: feature/live-guided-can
+          Source HEAD: 5ee1114a7376eebbc481ae51e0fdb8d921ce0d93
+          Product version: CraneCAN 0.7
+
+          Purpose:
+          Curated source handoff for review of PEAK PCAN live receive-only driver,
+          Live CAN receiver/session infrastructure, Live/Network WPF UI, passive
+          J1939/CANopen network discovery, project files, build script and smoke tests.
+
+          Important:
+          - CAN operation in this branch is receive-only / LISTEN ONLY.
+          - This is a curated source pack, not the complete repository.
+          - MainWindow uses partial code-behind. There is no separate classic MVVM
+            ViewModel for Live/Network in the current implementation.
+          - The Network tab is created mainly in MainWindow.NetworkTab*.cs rather
+            than being fully declared in XAML.
+          - For a fully buildable source tree use the original feature/live-guided-can
+            branch at the exact HEAD above.
+          EOF
+
+      - name: Upload curated source pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: CraneCAN_LiveGuided_Engineer_SourcePack_5ee1114
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 30
+          path: |
+            CraneCANAnalyzer/ENGINEER_SOURCE_PACK_README.txt
+            CraneCANAnalyzer/global.json
+            CraneCANAnalyzer/build-windows.ps1
+            CraneCANAnalyzer/README.md
+            CraneCANAnalyzer/docs/LIVE_GUIDED_DIAGNOSTICS.md
+            CraneCANAnalyzer/docs/CAN_NETWORK_DISCOVERY.md
+            CraneCANAnalyzer/docs/CAN_NETWORK_DISCOVERY_SPEC.md
+            CraneCANAnalyzer/docs/HC4900_PROFILE.md
+            CraneCANAnalyzer/profiles/hirschmann_hc4900.craneprofile
+            CraneCANAnalyzer/src/CraneCAN.Driver.PcanBasic/**
+            CraneCANAnalyzer/src/CraneCAN.Core/Drivers/**
+            CraneCANAnalyzer/src/CraneCAN.Core/Models/**
+            CraneCANAnalyzer/src/CraneCAN.Core/Live/**
+            CraneCANAnalyzer/src/CraneCAN.Core/Network/**
+            CraneCANAnalyzer/src/CraneCAN.Core/CraneCAN.Core.csproj
+            CraneCANAnalyzer/src/CraneCAN.App/CraneCAN.App.csproj
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.xaml
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.xaml.cs
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.Live.cs
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.PcanDiagnostics.cs
+            CraneCANAnalyzer/src/CraneCAN.App/PcanLiveProbe.cs
+            CraneCANAnalyzer/src/CraneCAN.App/LiveUiText.cs
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.Network*.cs
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.CandidateNetworkFlowSummary.cs
+            CraneCANAnalyzer/src/CraneCAN.App/MainWindow.CandidateProtocolHints.cs
+            CraneCANAnalyzer/tests/CraneCAN.SmokeTests/**
