@@ -1,5 +1,6 @@
 using System.Windows;
 using CraneCAN.Core.Drivers;
+using CraneCAN.Core.Models;
 using CraneCAN.Driver.PcanBasic;
 
 namespace CraneCAN.App;
