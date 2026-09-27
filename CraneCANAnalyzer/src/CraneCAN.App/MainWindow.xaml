@@ -1,7 +1,7 @@
 <Window x:Class="CraneCAN.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="CraneCAN 0.7 — Live Guided Diagnostics"
+        Title="Охотник за CAN-шиной 0.7 — Live Guided Diagnostics"
         Height="820"
         Width="1400"
         MinHeight="650"
@@ -65,7 +65,7 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="CraneCAN LIVE GUIDED DIAGNOSTICS"
+                                <TextBlock Text="ОХОТНИК ЗА CAN-ШИНОЙ · LIVE GUIDED DIAGNOSTICS"
                                            Foreground="White" FontSize="22" FontWeight="Bold" />
                                 <TextBlock Text="Пассивное наблюдение CAN · никаких функций передачи"
                                            Foreground="#BED0E2" Margin="0,4,0,0" FontSize="14" />
