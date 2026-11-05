@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Ports;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CraneCAN.Driver.Onk160.Capture;
 
@@ -13,6 +14,7 @@ public sealed class Onk160CaptureMarker
     public long RawByteOffset { get; set; }
     public string Label { get; set; } = "MARK";
     public string Comment { get; set; } = "";
+    [JsonIgnore]
     public string RelativeTimeText
     {
         get
@@ -138,7 +140,7 @@ public static class Onk160SessionStore
                 throw new FormatException("ONK-160 marker file is empty.");
             if (markerDocument.SchemaVersion != 1 || markerDocument.SessionId != manifest.SessionId)
                 throw new FormatException("Marker file does not belong to this session.");
-            markers = markerDocument.Markers.OrderBy(marker => marker.Id).ToList();
+            markers = (markerDocument.Markers ?? []).OrderBy(marker => marker.Id).ToList();
             ValidateMarkers(markers);
         }
 
