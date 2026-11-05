@@ -570,6 +570,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
 
         await WaitForMarkerPersistenceAsync(cancellationToken).ConfigureAwait(false);
+        var rawPath = CurrentRawPath;
+        var actualRawFileLength = rawPath is not null && File.Exists(rawPath)
+            ? new FileInfo(rawPath).Length
+            : -1;
         var stopTimestamp = DateTimeOffset.UtcNow;
         _sessionStopTimestamp = Stopwatch.GetTimestamp();
         lock (_stateLock)
@@ -578,7 +582,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
             _manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
             _manifest.IsComplete = _lastError is null && finalizationError is null &&
-                                   _manifest.TotalBytesReceived == _manifest.TotalBytesWritten;
+                                   _manifest.TotalBytesReceived == _manifest.TotalBytesWritten &&
+                                   actualRawFileLength == _manifest.TotalBytesWritten;
         }
 
         try
