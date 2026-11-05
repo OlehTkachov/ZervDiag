@@ -567,7 +567,7 @@
                          FontFamily="Segoe UI" FontSize="14" TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" />
             </TabItem>
-                    <TabItem Header="ОНК-160">
+            <TabItem Header="ОНК-160">
                 <views:Onk160CaptureView x:Name="Onk160CaptureTab" />
             </TabItem>
         </TabControl>
