@@ -438,7 +438,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         _idleBoundary = idleBoundary;
         Volatile.Write(ref _isRecording, 0);
 
-        if (idleBoundary is not null && _readerTask is { IsCompleted: false })
+        if (_readerTask is { IsCompleted: false })
         {
             try
             {
@@ -465,16 +465,37 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _maintenanceTask = null;
         }
 
+        Exception? finalizationError = null;
         await _fileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_rawStream is not null)
+            var stream = _rawStream;
+            if (stream is not null)
             {
-                await _rawStream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                _rawStream.Flush(flushToDisk: true);
-                Interlocked.Exchange(ref _lastDurableBytes, Interlocked.Read(ref _bytesWritten));
-                await _rawStream.DisposeAsync().ConfigureAwait(false);
-                _rawStream = null;
+                try
+                {
+                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    stream.Flush(flushToDisk: true);
+                    Interlocked.Exchange(ref _lastDurableBytes, Interlocked.Read(ref _bytesWritten));
+                }
+                catch (Exception exception)
+                {
+                    finalizationError = exception;
+                    ReportFault(exception);
+                }
+                finally
+                {
+                    try
+                    {
+                        await stream.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception exception)
+                    {
+                        finalizationError ??= exception;
+                        ReportFault(exception);
+                    }
+                    _rawStream = null;
+                }
             }
         }
         finally
@@ -486,30 +507,60 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             _manifest.StopTimestampUtc = stopTimestamp;
             _manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
-            _manifest.IsComplete = _lastError is null;
+            _manifest.IsComplete = _lastError is null && finalizationError is null;
         }
-        await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            finalizationError ??= exception;
+            ReportFault(exception);
+            lock (_stateLock)
+                _manifest.IsComplete = false;
+        }
+
+        if (finalizationError is not null)
+            throw new IOException("ONK-160 RAW was closed, but final flush or session metadata reported an error.", finalizationError);
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
-        await StopRecordingAsync(cancellationToken).ConfigureAwait(false);
-        var port = _port;
-        _port = null;
-        if (_readerCancellation is not null)
+        Exception? stopError = null;
+        try
         {
-            _readerCancellation.Cancel();
-            try { port?.Close(); } catch { }
-            if (_readerTask is not null)
-            {
-                try { await _readerTask.ConfigureAwait(false); }
-                catch (OperationCanceledException) { }
-            }
-            _readerCancellation.Dispose();
-            _readerCancellation = null;
-            _readerTask = null;
+            await StopRecordingAsync(cancellationToken).ConfigureAwait(false);
         }
-        port?.Dispose();
+        catch (Exception exception)
+        {
+            stopError = exception;
+        }
+        finally
+        {
+            var port = _port;
+            _port = null;
+            if (_readerCancellation is not null)
+            {
+                _readerCancellation.Cancel();
+                try { port?.Close(); } catch { }
+                if (_readerTask is not null)
+                {
+                    try { await _readerTask.ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+                    catch (Exception exception) { stopError ??= exception; }
+                }
+                _readerCancellation.Dispose();
+                _readerCancellation = null;
+                _readerTask = null;
+            }
+            try { port?.Dispose(); }
+            catch (Exception exception) { stopError ??= exception; }
+        }
+
+        if (stopError is not null)
+            throw stopError;
     }
 
     public async ValueTask DisposeAsync()
