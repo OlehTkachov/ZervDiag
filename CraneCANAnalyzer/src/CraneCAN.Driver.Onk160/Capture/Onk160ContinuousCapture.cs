@@ -47,7 +47,7 @@ public sealed record Onk160OpenedSession(
     string MarkersPath,
     IReadOnlyList<Onk160CaptureMarker> Markers);
 
-internal sealed class Onk160MarkersDocument
+public sealed class Onk160MarkersDocument
 {
     public int SchemaVersion { get; set; } = 1;
     public Guid SessionId { get; set; }
