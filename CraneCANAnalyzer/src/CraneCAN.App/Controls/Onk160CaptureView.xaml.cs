@@ -13,6 +13,7 @@ public partial class Onk160CaptureView : UserControl
     private readonly ObservableCollection<Onk160CaptureMarker> _markers = [];
     private readonly DispatcherTimer _timer;
     private Onk160OpenedSession? _openedSession;
+    private long? _openedRawLength;
 
     public Onk160CaptureView()
     {
@@ -121,6 +122,7 @@ public partial class Onk160CaptureView : UserControl
             await CommitAndPersistMarkerEditsAsync();
             await _capture.StartRecordingAsync(dialog.FileName);
             _openedSession = null;
+            _openedRawLength = null;
             _markers.Clear();
             SessionPathText.Text = dialog.FileName;
             StatusText.Text = "RECORDING. Исходные байты пишутся в один RAW-файл; метки не прерывают поток.";
@@ -175,6 +177,7 @@ public partial class Onk160CaptureView : UserControl
             await CommitAndPersistMarkerEditsAsync();
             var session = await Onk160SessionStore.LoadAsync(dialog.FileName);
             _openedSession = session;
+            _openedRawLength = new FileInfo(session.RawPath).Length;
             _markers.Clear();
             foreach (var marker in session.Markers)
                 _markers.Add(marker);
@@ -182,12 +185,12 @@ public partial class Onk160CaptureView : UserControl
                 ? session.Manifest.StopTimestampUtc.Value - session.Manifest.StartTimestampUtc
                 : DateTimeOffset.UtcNow - session.Manifest.StartTimestampUtc;
             ElapsedText.Text = FormatDuration(duration);
-            BytesText.Text = session.Manifest.TotalBytesWritten.ToString("N0");
+            BytesText.Text = _openedRawLength.Value.ToString("N0");
             MarkerCountText.Text = session.Markers.Count.ToString("N0");
             SessionPathText.Text = session.RawPath;
             StatusText.Text = session.Manifest.IsComplete
                 ? $"Сессия открыта: {Path.GetFileName(session.RawPath)}. RAW не загружался в RAM; доступны {session.Markers.Count:N0} меток."
-                : $"Открыта незавершённая/восстановленная сессия: {Path.GetFileName(session.RawPath)}. Проверяйте фактический размер RAW.";
+                : $"Открыта незавершённая сессия: RAW сейчас содержит {_openedRawLength.Value:N0} байт; manifest подтверждает {session.Manifest.TotalBytesWritten:N0} байт на последнем flush. Доступно меток: {session.Markers.Count:N0}.";
         }
         catch (Exception exception)
         {
@@ -364,7 +367,7 @@ public partial class Onk160CaptureView : UserControl
         {
             var end = _openedSession.Manifest.StopTimestampUtc ?? DateTimeOffset.UtcNow;
             ElapsedText.Text = FormatDuration(end - _openedSession.Manifest.StartTimestampUtc);
-            BytesText.Text = _openedSession.Manifest.TotalBytesWritten.ToString("N0");
+            BytesText.Text = (_openedRawLength ?? _openedSession.Manifest.TotalBytesWritten).ToString("N0");
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
         else if (_capture.CurrentManifest is { } manifest)
