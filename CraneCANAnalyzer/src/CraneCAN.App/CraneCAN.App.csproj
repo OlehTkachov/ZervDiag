@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\CraneCAN.Core\CraneCAN.Core.csproj" />
     <ProjectReference Include="..\CraneCAN.Driver.PcanBasic\CraneCAN.Driver.PcanBasic.csproj" />
+    <ProjectReference Include="..\CraneCAN.Driver.Onk160\CraneCAN.Driver.Onk160.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\README.md">
