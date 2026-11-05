@@ -1,4 +1,4 @@
-# CraneCAN 0.7 — Live Guided Diagnostics
+# CraneCAN 0.8.0-dev — Live Guided Diagnostics + ONK-160 Continuous Capture
 
 
 ## Отдельная вкладка ОНК-160
