@@ -1,5 +1,15 @@
 # История изменений
 
+## 0.8.0-dev — ONK-160 Continuous Marked Capture
+
+- Добавлена отдельная вкладка ОНК-160 в приложении Live Guided.
+- Добавлен независимый COM byte-capture path с фиксированными параметрами 38400 8E1 и без передачи данных.
+- RAW сохраняется непрерывно в один файл; пакетный декодер не находится на пути сохранения.
+- Добавлены общие и быстрые метки с UTC, монотонным временем, относительным временем и RAW byte offset.
+- Добавлены markers JSON, session manifest, периодический flush и повторное открытие сессии.
+- Добавлен smoke test побайтного RAW round-trip и восстановления 1000 меток.
+- CAN Live Capture, PCAN и CAN-анализатор функционально не переделывались.
+
 ## 0.7.0 — Live Guided Diagnostics
 
 - Добавлены общий Live CAN buffer и state machine REFERENCE/ACTION/POST.
