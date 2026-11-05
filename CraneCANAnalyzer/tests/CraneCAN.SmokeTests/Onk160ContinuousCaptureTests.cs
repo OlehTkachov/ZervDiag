@@ -36,17 +36,23 @@ internal static class Onk160ContinuousCaptureTests
                 ComPort = "COM99",
                 RawFileName = Path.GetFileName(rawPath),
                 MarkersFileName = Path.GetFileName(markersPath),
+                TotalBytesReceived = bytes.Length,
                 TotalBytesWritten = bytes.Length,
                 IsComplete = true
             };
 
             await Onk160SessionStore.SaveMarkersAsync(markersPath, sessionId, markers);
             await Onk160SessionStore.SaveManifestAsync(manifestPath, manifest);
+            var markerJson = await File.ReadAllTextAsync(markersPath);
+            Require(!markerJson.Contains("RelativeTimeText", StringComparison.Ordinal),
+                "Computed marker display text must not be persisted as a second time source.");
 
             var reopened = await Onk160SessionStore.LoadAsync(manifestPath);
             Require(reopened.Markers.Count == 1_000, "ONK session did not restore 1000 markers.");
             Require(reopened.Manifest.SessionId == sessionId, "ONK session ID was not restored.");
             Require(reopened.Manifest.ComPort == "COM99", "ONK COM port metadata was not restored.");
+            Require(reopened.Manifest.TotalBytesReceived == bytes.Length,
+                "ONK received byte count was not restored.");
             Require(reopened.Markers[999].Id == 1_000, "ONK marker sequence changed after reopening.");
             Require(reopened.Markers[999].RawByteOffset == 200_000,
                 "ONK marker raw byte offset changed after reopening.");
