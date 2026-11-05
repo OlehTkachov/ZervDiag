@@ -529,7 +529,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                     await WriteRawChunkAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
 
                 if (!IsRecording)
-                    _idleBoundary?.TrySetResult();
+                    _idleBoundary?.TrySetResult(true);
             }
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested ||
@@ -647,7 +647,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         _lastError = exception;
         Volatile.Write(ref _isRecording, 0);
         try { Faulted?.Invoke(exception); } catch { }
-        _idleBoundary?.TrySetResult();
+        _idleBoundary?.TrySetResult(true);
     }
 
     private static int PortSortKey(string name) =>
