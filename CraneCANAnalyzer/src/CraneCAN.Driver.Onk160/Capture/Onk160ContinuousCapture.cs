@@ -771,6 +771,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _metadataGate.Release();
         }
     }
+
     private async Task PersistMetadataAsync(CancellationToken cancellationToken = default)
     {
         var manifest = _manifest;
@@ -839,6 +840,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 QueueMarkerPersistence();
         }
     }
+
     private async Task PersistMarkersSafelyAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -848,6 +850,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         catch (Exception exception)
         {
             ReportFault(exception);
+            throw;
         }
     }
 
