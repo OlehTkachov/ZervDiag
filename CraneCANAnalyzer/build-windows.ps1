@@ -9,6 +9,7 @@ $publishedReadme = Join-Path $publishDirectory "README.md"
 $publishedFieldGuide = Join-Path $publishDirectory "docs\SOOSAN_FIELD_CAPTURE.md"
 $publishedGuidedGuide = Join-Path $publishDirectory "docs\GENERIC_GUIDED_DIAGNOSTICS.md"
 $publishedLiveGuide = Join-Path $publishDirectory "docs\LIVE_GUIDED_DIAGNOSTICS.md"
+$publishedOnkCaptureGuide = Join-Path $publishDirectory "docs\ONK160_CONTINUOUS_CAPTURE.md"
 $publishedNetworkGuide = Join-Path $publishDirectory "docs\CAN_NETWORK_DISCOVERY.md"
 $publishedNetworkSpec = Join-Path $publishDirectory "docs\CAN_NETWORK_DISCOVERY_SPEC.md"
 $publishedFixture = Join-Path $publishDirectory "samples\soosan_mixed.trc"
@@ -77,6 +78,9 @@ if (-not (Test-Path -LiteralPath $publishedGuidedGuide)) {
 if (-not (Test-Path -LiteralPath $publishedLiveGuide)) {
     throw "Live Guided operator guide was not copied to the publish directory: $publishedLiveGuide"
 }
+if (-not (Test-Path -LiteralPath $publishedOnkCaptureGuide)) {
+    throw "ONK-160 Continuous Capture guide was not copied to the publish directory: $publishedOnkCaptureGuide"
+}
 if (-not (Test-Path -LiteralPath $publishedNetworkGuide)) {
     throw "Network discovery guide was not copied to the publish directory: $publishedNetworkGuide"
 }
@@ -97,6 +101,6 @@ Set-Content -LiteralPath (Join-Path $publishDirectory "SHA256SUMS.txt") -Value $
 Write-Host ""
 Write-Host "READY: $publishDirectory" -ForegroundColor Green
 Write-Host "Run: CraneCAN.Live.exe"
-Write-Host "Read first: README.md, docs\LIVE_GUIDED_DIAGNOSTICS.md and docs\CAN_NETWORK_DISCOVERY.md"
+Write-Host "Read first: README.md, docs\LIVE_GUIDED_DIAGNOSTICS.md, docs\ONK160_CONTINUOUS_CAPTURE.md and docs\CAN_NETWORK_DISCOVERY.md"
 Write-Host "The target PC does not need .NET Runtime. Copy the entire publish folder."
 Write-Host "Start with samples\live_guided_demo.trc in Replay. Live PCAN is receive-only."
