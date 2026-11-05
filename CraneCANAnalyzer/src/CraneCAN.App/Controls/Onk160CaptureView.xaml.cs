@@ -360,20 +360,20 @@ public partial class Onk160CaptureView : UserControl
         if (_capture.HasOpenCapture)
         {
             ElapsedText.Text = FormatDuration(_capture.GetElapsed());
-            BytesText.Text = _capture.BytesWritten.ToString("N0");
+            BytesText.Text = $"{_capture.BytesReceived:N0} / {_capture.BytesWritten:N0}";
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
         else if (_openedSession is not null)
         {
             var end = _openedSession.Manifest.StopTimestampUtc ?? DateTimeOffset.UtcNow;
             ElapsedText.Text = FormatDuration(end - _openedSession.Manifest.StartTimestampUtc);
-            BytesText.Text = (_openedRawLength ?? _openedSession.Manifest.TotalBytesWritten).ToString("N0");
+            BytesText.Text = $"{_openedSession.Manifest.TotalBytesReceived:N0} / {(_openedRawLength ?? _openedSession.Manifest.TotalBytesWritten):N0}";
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
         else if (_capture.CurrentManifest is { } manifest)
         {
             ElapsedText.Text = FormatDuration(_capture.GetElapsed());
-            BytesText.Text = manifest.TotalBytesWritten.ToString("N0");
+            BytesText.Text = $"{manifest.TotalBytesReceived:N0} / {manifest.TotalBytesWritten:N0}";
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
         else
