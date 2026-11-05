@@ -41,6 +41,7 @@ internal static class Onk160ContinuousCaptureTests
                 SessionId = sessionId,
                 StartTimestampUtc = start,
                 SessionStartMonotonicTimestamp = 1_000_000,
+                SessionStopMonotonicTimestamp = 3_001_000_000,
                 MonotonicClockFrequency = 10_000_000,
                 StopTimestampUtc = start.AddMinutes(5),
                 ComPort = "COM99",
