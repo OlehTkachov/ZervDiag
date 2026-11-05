@@ -382,7 +382,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _markers.Add(marker);
         }
 
-        _ = PersistMarkersSafelyAsync();
+        _ = Task.Run(() => PersistMarkersSafelyAsync());
         return marker;
     }
 
