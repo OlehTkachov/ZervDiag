@@ -386,9 +386,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _manifestPath = sidecars.ManifestPath;
             _markersPath = sidecars.MarkersPath;
             _markers = [];
-            Interlocked.Exchange(ref _markerRevision, 0);
-            Interlocked.Exchange(ref _persistedMarkerRevision, 0);
-            Interlocked.Exchange(ref _markerPersistenceWorker, 0);
             _sessionStartTimestamp = manifest.SessionStartMonotonicTimestamp;
             _sessionStopTimestamp = 0;
             _idleBoundary = null;
