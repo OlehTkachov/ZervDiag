@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/live-guided-can
+      - feature/onk160-continuous-capture
   workflow_dispatch:
 
 jobs:
