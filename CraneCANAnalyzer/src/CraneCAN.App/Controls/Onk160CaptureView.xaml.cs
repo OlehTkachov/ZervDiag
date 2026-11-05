@@ -35,15 +35,30 @@ public partial class Onk160CaptureView : UserControl
     public async Task StopOnWindowCloseAsync()
     {
         _timer.Stop();
-        await CommitAndPersistMarkerEditsAsync();
+        Exception? shutdownError = null;
         try
         {
+            await CommitAndPersistMarkerEditsAsync();
             await _capture.StopRecordingAsync();
+        }
+        catch (Exception exception)
+        {
+            shutdownError = exception;
         }
         finally
         {
-            await _capture.DisconnectAsync();
+            try
+            {
+                await _capture.DisconnectAsync();
+            }
+            catch (Exception exception)
+            {
+                shutdownError ??= exception;
+            }
         }
+
+        if (shutdownError is not null)
+            throw shutdownError;
     }
 
     private async void RefreshPortsButton_Click(object sender, RoutedEventArgs e) =>
@@ -186,18 +201,9 @@ public partial class Onk160CaptureView : UserControl
             _markers.Clear();
             foreach (var marker in session.Markers)
                 _markers.Add(marker);
-            var duration = session.Manifest.SessionStopMonotonicTimestamp >
-                           session.Manifest.SessionStartMonotonicTimestamp &&
-                           session.Manifest.MonotonicClockFrequency > 0
-                ? TimeSpan.FromSeconds(
-                    (session.Manifest.SessionStopMonotonicTimestamp -
-                     session.Manifest.SessionStartMonotonicTimestamp) /
-                    (double)session.Manifest.MonotonicClockFrequency)
-                : session.Manifest.StopTimestampUtc.HasValue
-                    ? session.Manifest.StopTimestampUtc.Value - session.Manifest.StartTimestampUtc
-                    : DateTimeOffset.UtcNow - session.Manifest.StartTimestampUtc;
+            var duration = GetSessionDuration(session.Manifest);
             ElapsedText.Text = FormatDuration(duration);
-            BytesText.Text = _openedRawLength.Value.ToString("N0");
+            BytesText.Text = $"{session.Manifest.TotalBytesReceived:N0} / {_openedRawLength.Value:N0}";
             MarkerCountText.Text = session.Markers.Count.ToString("N0");
             SessionPathText.Text = session.RawPath;
             var integrityMatches = session.Manifest.TotalBytesReceived == session.Manifest.TotalBytesWritten &&
@@ -238,7 +244,14 @@ public partial class Onk160CaptureView : UserControl
         marker.Label = details.Value.Label;
         marker.Comment = details.Value.Comment;
         MarkersGrid.Items.Refresh();
-        await PersistMarkerEditsAsync();
+        try
+        {
+            await PersistMarkerEditsAsync();
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = "Не удалось сохранить комментарий метки: " + exception.Message;
+        }
     }
 
     private async Task<Onk160CaptureMarker?> AddMarkerAsync(string label)
@@ -306,7 +319,17 @@ public partial class Onk160CaptureView : UserControl
     }
 
     private void MarkersGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e) =>
-        Dispatcher.BeginInvoke(new Action(async () => await PersistMarkerEditsAsync()));
+        Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            try
+            {
+                await PersistMarkerEditsAsync();
+            }
+            catch (Exception exception)
+            {
+                StatusText.Text = "Не удалось сохранить комментарий метки: " + exception.Message;
+            }
+        }));
 
     private async Task CommitAndPersistMarkerEditsAsync()
     {
@@ -334,7 +357,23 @@ public partial class Onk160CaptureView : UserControl
         catch (Exception exception)
         {
             StatusText.Text = "Не удалось сохранить комментарии к меткам: " + exception.Message;
+            throw;
         }
+    }
+
+    private static TimeSpan GetSessionDuration(Onk160CaptureSessionManifest manifest)
+    {
+        if (manifest.SessionStopMonotonicTimestamp > manifest.SessionStartMonotonicTimestamp &&
+            manifest.MonotonicClockFrequency > 0)
+        {
+            return TimeSpan.FromSeconds(
+                (manifest.SessionStopMonotonicTimestamp - manifest.SessionStartMonotonicTimestamp) /
+                (double)manifest.MonotonicClockFrequency);
+        }
+
+        return manifest.StopTimestampUtc.HasValue
+            ? manifest.StopTimestampUtc.Value - manifest.StartTimestampUtc
+            : DateTimeOffset.UtcNow - manifest.StartTimestampUtc;
     }
 
     private void Capture_Faulted(Exception exception)
@@ -383,8 +422,7 @@ public partial class Onk160CaptureView : UserControl
         }
         else if (_openedSession is not null)
         {
-            var end = _openedSession.Manifest.StopTimestampUtc ?? DateTimeOffset.UtcNow;
-            ElapsedText.Text = FormatDuration(end - _openedSession.Manifest.StartTimestampUtc);
+            ElapsedText.Text = FormatDuration(GetSessionDuration(_openedSession.Manifest));
             BytesText.Text = $"{_openedSession.Manifest.TotalBytesReceived:N0} / {(_openedRawLength ?? _openedSession.Manifest.TotalBytesWritten):N0}";
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
