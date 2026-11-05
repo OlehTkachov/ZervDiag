@@ -7,7 +7,7 @@
 - RAW сохраняется непрерывно в один файл; пакетный декодер не находится на пути сохранения.
 - Добавлены общие и быстрые метки с UTC, монотонным временем, относительным временем и RAW byte offset.
 - Добавлены markers JSON, session manifest, периодический flush и повторное открытие сессии.
-- Добавлен smoke test побайтного RAW round-trip и восстановления 1000 меток.
+- Добавлен end-to-end smoke test синтетического byte source → RAW writer, drain при STOP, контроль received/written/durable bytes и восстановления 1000 меток.
 - CAN Live Capture, PCAN и CAN-анализатор функционально не переделывались.
 
 ## 0.7.0 — Live Guided Diagnostics
