@@ -279,7 +279,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             RtsEnable = false,
             ReadBufferSize = 65_536,
             ReadTimeout = 100,
-            WriteTimeout = 100
+            WriteTimeout = 100,
+            ParityReplace = 0
         };
 
         port.Open();
