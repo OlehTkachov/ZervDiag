@@ -420,8 +420,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             throw;
         }
 
-        Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
-        SignalMarkerPersistenceProgress();
         Volatile.Write(ref _isRecording, 1);
         _maintenanceCancellation = new CancellationTokenSource();
         _maintenanceTask = Task.Run(
@@ -491,8 +489,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             Interlocked.Increment(ref _markerRevision);
         }
         await PersistMarkersSafelyAsync(cancellationToken).ConfigureAwait(false);
-        Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
-        SignalMarkerPersistenceProgress();
     }
 
     public TimeSpan GetElapsed()
@@ -599,8 +595,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         try
         {
             await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
-            Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
-            SignalMarkerPersistenceProgress();
         }
         catch (Exception exception)
         {
@@ -803,12 +797,14 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             Onk160CaptureSessionManifest manifestSnapshot;
             Onk160CaptureMarker[] markerSnapshot;
+            long markerRevisionSnapshot;
             lock (_stateLock)
             {
                 manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
                 manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
                 manifestSnapshot = CloneManifest(manifest);
                 markerSnapshot = _markers.Select(CloneMarker).ToArray();
+                markerRevisionSnapshot = Interlocked.Read(ref _markerRevision);
             }
 
             await Onk160SessionStore.SaveMarkersAsync(
@@ -816,6 +812,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 .ConfigureAwait(false);
             await Onk160SessionStore.SaveManifestAsync(
                 manifestPath, manifestSnapshot, cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _persistedMarkerRevision, markerRevisionSnapshot);
+            SignalMarkerPersistenceProgress();
         }
         finally
         {
@@ -873,8 +871,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                     break;
 
                 await PersistMetadataAsync().ConfigureAwait(false);
-                Interlocked.Exchange(ref _persistedMarkerRevision, targetRevision);
-                SignalMarkerPersistenceProgress();
             }
         }
         catch (Exception exception)
