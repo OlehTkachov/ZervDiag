@@ -240,7 +240,10 @@ public partial class Onk160CaptureView : UserControl
         {
             StatusText.Text = $"Сохранение метки {label}…";
             var marker = await _capture.AddMarkerAsync(label);
-            _markers.Add(marker);
+            var insertIndex = 0;
+            while (insertIndex < _markers.Count && _markers[insertIndex].Id < marker.Id)
+                insertIndex++;
+            _markers.Insert(insertIndex, marker);
             MarkersGrid.ScrollIntoView(marker);
             StatusText.Text = $"Метка #{marker.Id} сохранена.";
             RefreshDisplay();
