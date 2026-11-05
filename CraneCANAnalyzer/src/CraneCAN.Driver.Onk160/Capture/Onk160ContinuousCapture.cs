@@ -215,6 +215,7 @@ public interface IOnk160ByteSource : IDisposable
 {
     string PortName { get; }
     bool IsOpen { get; }
+    int BytesAvailable { get; }
     void Open();
     int Read(byte[] buffer, int offset, int count);
     void Close();
@@ -240,6 +241,7 @@ internal sealed class SerialPortOnk160ByteSource : IOnk160ByteSource
 
     public string PortName => _port.PortName;
     public bool IsOpen => _port.IsOpen;
+    public int BytesAvailable => _port.IsOpen ? _port.BytesToRead : 0;
     public void Open() => _port.Open();
     public int Read(byte[] buffer, int offset, int count) => _port.Read(buffer, offset, count);
     public void Close() => _port.Close();
@@ -273,6 +275,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private long _persistedMarkerRevision;
     private int _markerPersistenceWorker;
     private int _isRecording;
+    private int _stopRequested;
     private Exception? _lastError;
 
     public Onk160ContinuousCapture(Func<string, IOnk160ByteSource>? sourceFactory = null)
@@ -332,6 +335,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             throw;
         }
         _source = source;
+        Volatile.Write(ref _stopRequested, 0);
         _lastError = null;
         var readerCancellation = new CancellationTokenSource();
         _readerCancellation = readerCancellation;
@@ -384,6 +388,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             Interlocked.Exchange(ref _bytesWritten, 0);
             Interlocked.Exchange(ref _lastDurableBytes, 0);
             Volatile.Write(ref _isRecording, 0);
+            Volatile.Write(ref _stopRequested, 0);
         }
 
         try
@@ -494,11 +499,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             return;
 
         // The STOP timestamp is captured before waiting for the reader or disk.
-        var stopTimestamp = DateTimeOffset.UtcNow;
-        _sessionStopTimestamp = Stopwatch.GetTimestamp();
         var idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _idleBoundary = idleBoundary;
         Volatile.Write(ref _isRecording, 0);
+        Volatile.Write(ref _stopRequested, 1);
 
         if (_readerTask is { IsCompleted: false })
         {
@@ -559,6 +563,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _fileGate.Release();
         }
 
+        var stopTimestamp = DateTimeOffset.UtcNow;
+        _sessionStopTimestamp = Stopwatch.GetTimestamp();
         lock (_stateLock)
         {
             _manifest.StopTimestampUtc = stopTimestamp;
@@ -642,19 +648,30 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 }
                 catch (TimeoutException)
                 {
-                    if (!IsRecording)
+                    if (Volatile.Read(ref _stopRequested) == 1)
+                    {
                         _idleBoundary?.TrySetResult(true);
+                        break;
+                    }
                     continue;
                 }
 
-                if (count > 0 && (recordingAtReadStart || IsRecording))
+                var stopRequested = Volatile.Read(ref _stopRequested) == 1;
+                if (count > 0 && (recordingAtReadStart || IsRecording || stopRequested))
                 {
                     Interlocked.Add(ref _bytesReceived, count);
                     await WriteRawChunkAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
                 }
 
-                if (!IsRecording)
-                    _idleBoundary?.TrySetResult(true);
+                if (Volatile.Read(ref _stopRequested) == 1)
+                {
+                    // Drain bytes already buffered by the serial driver at the STOP boundary.
+                    if (source.BytesAvailable <= 0)
+                    {
+                        _idleBoundary?.TrySetResult(true);
+                        break;
+                    }
+                }
             }
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested ||
@@ -669,10 +686,9 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         catch (Exception exception)
         {
             ReportFault(exception);
-            try { port.Close(); } catch { }
+            try { source.Close(); } catch { }
         }
     }
-
     private async Task WriteRawChunkAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
     {
         await _fileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -808,6 +824,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     {
         _lastError = exception;
         Volatile.Write(ref _isRecording, 0);
+        Volatile.Write(ref _stopRequested, 1);
         try { Faulted?.Invoke(exception); } catch { }
         _idleBoundary?.TrySetResult(true);
     }
