@@ -1,0 +1,125 @@
+<UserControl x:Class="CraneCAN.App.Controls.Onk160CaptureView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Padding="12" Margin="0,0,0,8" Background="#EEF3F8"
+                BorderBrush="#C7D2DE" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="ОНК-160 · CONTINUOUS MARKED CAPTURE"
+                               FontSize="19" FontWeight="Bold" />
+                    <TextBlock Text="Непрерывное сохранение исходных байтов. Метки не останавливают и не разбивают запись."
+                               Margin="0,4,0,0" Foreground="#586574" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#246B48" Padding="10,6" CornerRadius="3" Margin="4">
+                        <TextBlock x:Name="SerialSettingsText" Text="38400 · 8E1"
+                                   Foreground="White" FontWeight="Bold" />
+                    </Border>
+                    <Border Background="#48596A" Padding="10,6" CornerRadius="3" Margin="4">
+                        <TextBlock x:Name="ConnectionStateText" Text="DISCONNECTED"
+                                   Foreground="White" FontWeight="Bold" />
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <GroupBox Grid.Row="1" Header="Подключение и запись" Padding="8" Margin="0,0,0,8">
+            <StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="COM-порт:" VerticalAlignment="Center" Margin="4" />
+                    <ComboBox x:Name="ComPortCombo" Width="145" IsEditable="True"
+                              IsTextSearchEnabled="False"
+                              ToolTip="Выберите порт или введите вручную, например COM4" />
+                    <Button x:Name="RefreshPortsButton" Content="Обновить" Click="RefreshPortsButton_Click" />
+                    <Button x:Name="ConnectButton" Content="CONNECT" Click="ConnectButton_Click" FontWeight="Bold" />
+                    <Button x:Name="DisconnectButton" Content="DISCONNECT"
+                            Click="DisconnectButton_Click" IsEnabled="False" />
+                    <Separator Width="18" Opacity="0" />
+                    <Button x:Name="StartButton" Content="START RECORDING"
+                            Click="StartButton_Click" IsEnabled="False"
+                            Background="#246B48" Foreground="White" FontWeight="Bold" />
+                    <Button x:Name="StopButton" Content="STOP"
+                            Click="StopButton_Click" IsEnabled="False"
+                            Background="#A83232" Foreground="White" FontWeight="Bold" />
+                    <Button x:Name="OpenSessionButton" Content="Открыть сессию…"
+                            Click="OpenSessionButton_Click" />
+                </WrapPanel>
+                <TextBlock x:Name="StatusText" Margin="4,6,4,0"
+                           Text="Выберите COM-порт и подключитесь. Приём — только 38400 8E1."
+                           TextWrapping="Wrap" />
+                <TextBlock x:Name="SessionPathText" Margin="4,3,4,0"
+                           Foreground="#586574" Text="Сессия не выбрана."
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Grid.Row="2" Header="Управление метками" Padding="8" Margin="0,0,0,8">
+            <StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <Button x:Name="GenericMarkButton" Content="+ МЕТКА"
+                            Click="GenericMarkButton_Click" FontWeight="Bold" />
+                    <Button x:Name="PressureOffButton" Content="Давление OFF"
+                            Click="QuickMarkerButton_Click" Tag="PRESSURE_OFF" />
+                    <Button x:Name="PressureOnButton" Content="Давление ON"
+                            Click="QuickMarkerButton_Click" Tag="PRESSURE_ON" />
+                    <Button x:Name="KosOffButton" Content="КОС OFF"
+                            Click="QuickMarkerButton_Click" Tag="KOS_OFF" />
+                    <Button x:Name="KosOnButton" Content="КОС ON"
+                            Click="QuickMarkerButton_Click" Tag="KOS_ON" />
+                    <Button x:Name="HookLimitButton" Content="Ограничитель"
+                            Click="QuickMarkerButton_Click" Tag="HOOK_LIMIT" />
+                    <Button x:Name="OtherButton" Content="Другое…"
+                            Click="OtherButton_Click" />
+                </WrapPanel>
+                <Grid Margin="4,6,4,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Сессия:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ElapsedText" Grid.Column="1" Text="00:00:00.000"
+                               Margin="8,0" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="RAW bytes:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="BytesText" Grid.Column="3" Text="0"
+                               Margin="8,0" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="4" Text="Метки:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="MarkerCountText" Grid.Column="5" Text="0"
+                               Margin="8,0" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock x:Name="RecordingIndicatorText" Grid.Column="6" Text="● IDLE"
+                               Foreground="#586574" FontWeight="Bold" VerticalAlignment="Center" />
+                </Grid>
+            </StackPanel>
+        </GroupBox>
+
+        <DataGrid Grid.Row="3" x:Name="MarkersGrid" AutoGenerateColumns="False"
+                  IsReadOnly="False" CanUserAddRows="False" SelectionMode="Single"
+                  EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                  GridLinesVisibility="Horizontal" CellEditEnding="MarkersGrid_CellEditEnding">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="55" IsReadOnly="True" />
+                <DataGridTextColumn Header="UTC timestamp" Binding="{Binding AbsoluteTimestampUtc, StringFormat=yyyy-MM-dd HH:mm:ss.fff}" Width="190" IsReadOnly="True" />
+                <DataGridTextColumn Header="От начала" Binding="{Binding RelativeTimeText}" Width="115" IsReadOnly="True" />
+                <DataGridTextColumn Header="RAW byte offset" Binding="{Binding RawByteOffset}" Width="120" IsReadOnly="True" />
+                <DataGridTextColumn Header="Метка" Binding="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Width="180" />
+                <DataGridTextColumn Header="Комментарий" Binding="{Binding Comment, UpdateSourceTrigger=PropertyChanged}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>
