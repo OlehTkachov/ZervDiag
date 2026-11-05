@@ -358,8 +358,7 @@ public partial class Onk160CaptureView : UserControl
         }
         else if (_capture.CurrentManifest is { } manifest)
         {
-            var end = manifest.StopTimestampUtc ?? manifest.StartTimestampUtc;
-            ElapsedText.Text = FormatDuration(end - manifest.StartTimestampUtc);
+            ElapsedText.Text = FormatDuration(_capture.GetElapsed());
             BytesText.Text = manifest.TotalBytesWritten.ToString("N0");
             MarkerCountText.Text = _markers.Count.ToString("N0");
         }
