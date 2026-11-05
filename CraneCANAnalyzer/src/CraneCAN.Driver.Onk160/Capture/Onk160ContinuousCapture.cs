@@ -38,6 +38,7 @@ public sealed class Onk160CaptureSessionManifest
     public int StopBits { get; set; } = 1;
     public string RawFileName { get; set; } = "";
     public string MarkersFileName { get; set; } = "";
+    public long TotalBytesReceived { get; set; }
     public long TotalBytesWritten { get; set; }
     public bool IsComplete { get; set; }
 }
@@ -230,6 +231,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private TaskCompletionSource<bool>? _idleBoundary;
     private long _sessionStartTimestamp;
     private long _sessionStopTimestamp;
+    private long _bytesReceived;
     private long _bytesWritten;
     private long _lastDurableBytes;
     private long _markerRevision;
@@ -243,6 +245,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     public bool IsConnected => _port?.IsOpen == true;
     public bool IsRecording => Volatile.Read(ref _isRecording) == 1;
     public bool HasOpenCapture => _rawStream is not null;
+    public long BytesReceived => Interlocked.Read(ref _bytesReceived);
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
     public Exception? LastError => _lastError;
     public string? ConnectedPort => _port?.PortName;
@@ -348,6 +351,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _sessionStopTimestamp = 0;
             _idleBoundary = null;
             _lastError = null;
+            Interlocked.Exchange(ref _bytesReceived, 0);
             Interlocked.Exchange(ref _bytesWritten, 0);
             Interlocked.Exchange(ref _lastDurableBytes, 0);
             Volatile.Write(ref _isRecording, 0);
@@ -529,8 +533,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         lock (_stateLock)
         {
             _manifest.StopTimestampUtc = stopTimestamp;
+            _manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
             _manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
-            _manifest.IsComplete = _lastError is null && finalizationError is null;
+            _manifest.IsComplete = _lastError is null && finalizationError is null &&
+                                   _manifest.TotalBytesReceived == _manifest.TotalBytesWritten;
         }
 
         try
@@ -614,7 +620,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 }
 
                 if (count > 0 && (recordingAtReadStart || IsRecording))
+                {
+                    Interlocked.Add(ref _bytesReceived, count);
                     await WriteRawChunkAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+                }
 
                 if (!IsRecording)
                     _idleBoundary?.TrySetResult(true);
@@ -702,6 +711,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             Onk160CaptureMarker[] markerSnapshot;
             lock (_stateLock)
             {
+                manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
                 manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
                 manifestSnapshot = CloneManifest(manifest);
                 markerSnapshot = _markers.Select(CloneMarker).ToArray();
@@ -802,6 +812,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         StopBits = manifest.StopBits,
         RawFileName = manifest.RawFileName,
         MarkersFileName = manifest.MarkersFileName,
+        TotalBytesReceived = manifest.TotalBytesReceived,
         TotalBytesWritten = manifest.TotalBytesWritten,
         IsComplete = manifest.IsComplete
     };
