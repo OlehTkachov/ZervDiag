@@ -227,6 +227,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private List<Onk160CaptureMarker> _markers = [];
     private TaskCompletionSource<bool>? _idleBoundary;
     private long _sessionStartTimestamp;
+    private long _sessionStopTimestamp;
     private long _bytesWritten;
     private int _isRecording;
     private Exception? _lastError;
@@ -262,6 +263,14 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             throw new InvalidOperationException("An ONK-160 COM port is already connected.");
         if (_readerTask is { IsCompleted: false })
             throw new InvalidOperationException("The previous ONK-160 reader has not stopped.");
+        if (_readerTask is not null)
+        {
+            _readerCancellation?.Dispose();
+            _readerCancellation = null;
+            _readerTask = null;
+            try { _port?.Dispose(); } catch { }
+            _port = null;
+        }
 
         var port = new SerialPort(portName.Trim(), RequiredBaudRate, Parity.Even, 8, StopBits.One)
         {
@@ -318,6 +327,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _markersPath = sidecars.MarkersPath;
             _markers = [];
             _sessionStartTimestamp = Stopwatch.GetTimestamp();
+            _sessionStopTimestamp = 0;
             _idleBoundary = null;
             _lastError = null;
             Interlocked.Exchange(ref _bytesWritten, 0);
@@ -403,11 +413,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             return TimeSpan.Zero;
         var end = IsRecording
             ? Stopwatch.GetTimestamp()
-            : _manifest.StopTimestampUtc.HasValue
-                ? _sessionStartTimestamp == 0
-                    ? Stopwatch.GetTimestamp()
-                    : _sessionStartTimestamp + (long)(_manifest.StopTimestampUtc.Value
-                        .Subtract(_manifest.StartTimestampUtc).TotalSeconds * Stopwatch.Frequency)
+            : _sessionStopTimestamp != 0
+                ? _sessionStopTimestamp
                 : _sessionStartTimestamp;
         return _sessionStartTimestamp == 0
             ? TimeSpan.Zero
@@ -421,6 +428,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
         // The STOP timestamp is captured before waiting for the reader or disk.
         var stopTimestamp = DateTimeOffset.UtcNow;
+        _sessionStopTimestamp = Stopwatch.GetTimestamp();
         var idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _idleBoundary = idleBoundary;
         Volatile.Write(ref _isRecording, 0);
