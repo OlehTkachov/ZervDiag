@@ -93,6 +93,7 @@ internal static class Onk160ContinuousCaptureTests
             await capture.StartRecordingAsync(rawPath);
 
             using var expected = new MemoryStream();
+            var markerTasks = new List<Task<Onk160CaptureMarker>>();
             for (var index = 0; index < 1_000; index++)
             {
                 var chunk = Enumerable.Range(0, 512)
@@ -102,8 +103,10 @@ internal static class Onk160ContinuousCaptureTests
                 source.Enqueue(chunk);
 
                 var label = index % 2 == 0 ? "PRESSURE_OFF" : "KOS_ON";
-                capture.AddMarker(label, "Synthetic pipeline marker");
+                markerTasks.Add(capture.AddMarkerAsync(label, "Synthetic pipeline marker"));
             }
+
+            await Task.WhenAll(markerTasks);
 
             // Put the final chunk into the source immediately before STOP. The reader must
             // drain bytes already buffered by the source before closing the RAW file.
