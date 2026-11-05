@@ -24,8 +24,11 @@ public partial class Onk160CaptureView : UserControl
         _timer.Tick += (_, _) => RefreshDisplay();
         _timer.Start();
 
-        Loaded += async (_, _) => await RefreshPortsAsync();
-        Unloaded += (_, _) => _timer.Stop();
+        Loaded += async (_, _) =>
+        {
+            _timer.Start();
+            await RefreshPortsAsync();
+        };
     }
 
     public async Task StopOnWindowCloseAsync()
