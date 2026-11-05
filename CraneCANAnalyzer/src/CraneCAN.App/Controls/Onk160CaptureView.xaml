@@ -96,7 +96,7 @@
                     <TextBlock Grid.Column="0" Text="Сессия:" VerticalAlignment="Center" />
                     <TextBlock x:Name="ElapsedText" Grid.Column="1" Text="00:00:00.000"
                                Margin="8,0" FontWeight="Bold" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Text="RAW bytes:" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="RAW received / written:" VerticalAlignment="Center" />
                     <TextBlock x:Name="BytesText" Grid.Column="3" Text="0"
                                Margin="8,0" FontWeight="Bold" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="4" Text="Метки:" VerticalAlignment="Center" />
