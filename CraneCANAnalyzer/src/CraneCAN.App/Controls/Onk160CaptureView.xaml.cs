@@ -142,9 +142,14 @@ public partial class Onk160CaptureView : UserControl
         {
             await CommitAndPersistMarkerEditsAsync();
             await _capture.StopRecordingAsync();
-            StatusText.Text = _capture.LastError is null
-                ? "Запись остановлена. RAW и метки сохранены."
-                : "Запись остановлена с ошибкой: " + _capture.LastError.Message;
+            var manifest = _capture.CurrentManifest;
+            StatusText.Text = manifest is { IsComplete: true } &&
+                              manifest.TotalBytesReceived == manifest.TotalBytesWritten
+                ? $"Запись остановлена. Проверка целостности OK: {manifest.TotalBytesWritten:N0} байт; меток: {_markers.Count:N0}."
+                : manifest is not null
+                    ? $"Сессия закрыта, но помечена НЕПОЛНОЙ: получено {manifest.TotalBytesReceived:N0}, записано с подтверждённым flush {manifest.TotalBytesWritten:N0} байт. " +
+                      (_capture.LastError?.Message ?? "Проверьте RAW перед анализом.")
+                    : "Запись остановлена.";
         }
         catch (Exception exception)
         {
