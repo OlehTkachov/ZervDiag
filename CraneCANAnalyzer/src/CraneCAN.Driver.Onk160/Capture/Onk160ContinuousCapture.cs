@@ -440,15 +440,9 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
         if (_readerTask is { IsCompleted: false })
         {
-            try
-            {
-                await idleBoundary.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // Continue with a final flush; the RAW file remains usable up to its last written byte.
-            }
+            // Do not close the RAW stream until the in-flight COM read and its disk write are complete.
+            // The serial read timeout is 100 ms; the boundary is also signalled on reader faults.
+            await idleBoundary.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (_maintenanceCancellation is not null)
