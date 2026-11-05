@@ -286,7 +286,15 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             ParityReplace = 0
         };
 
-        port.Open();
+        try
+        {
+            port.Open();
+        }
+        catch
+        {
+            port.Dispose();
+            throw;
+        }
         _port = port;
         _lastError = null;
         var readerCancellation = new CancellationTokenSource();
@@ -336,20 +344,32 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _lastError = null;
             Interlocked.Exchange(ref _bytesWritten, 0);
             Interlocked.Exchange(ref _lastDurableBytes, 0);
-            Volatile.Write(ref _isRecording, 1);
+            Volatile.Write(ref _isRecording, 0);
         }
 
         try
         {
+            // Publish the session sidecars before enabling capture. This avoids racing
+            // the first raw write against creation of the manifest and marker document.
             await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            Volatile.Write(ref _isRecording, 0);
-            await rawStream.DisposeAsync().ConfigureAwait(false);
-            _rawStream = null;
+            await _fileGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await rawStream.DisposeAsync().ConfigureAwait(false);
+                if (ReferenceEquals(_rawStream, rawStream))
+                    _rawStream = null;
+            }
+            finally
+            {
+                _fileGate.Release();
+            }
             throw;
         }
+
+        Volatile.Write(ref _isRecording, 1);
         _maintenanceCancellation = new CancellationTokenSource();
         _maintenanceTask = Task.Run(
             () => MaintenanceLoopAsync(_maintenanceCancellation.Token), CancellationToken.None);
