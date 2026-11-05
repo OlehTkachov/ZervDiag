@@ -569,6 +569,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _fileGate.Release();
         }
 
+        await WaitForMarkerPersistenceAsync(cancellationToken).ConfigureAwait(false);
         var stopTimestamp = DateTimeOffset.UtcNow;
         _sessionStopTimestamp = Stopwatch.GetTimestamp();
         lock (_stateLock)
@@ -805,6 +806,11 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
     }
 
+    private async Task WaitForMarkerPersistenceAsync(CancellationToken cancellationToken)
+    {
+        while (Volatile.Read(ref _markerPersistenceWorker) == 1)
+            await Task.Delay(5, cancellationToken).ConfigureAwait(false);
+    }
     private void QueueMarkerPersistence()
     {
         if (!IsRecording || _lastError is not null)
