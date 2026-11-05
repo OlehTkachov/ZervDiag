@@ -186,9 +186,16 @@ public partial class Onk160CaptureView : UserControl
             _markers.Clear();
             foreach (var marker in session.Markers)
                 _markers.Add(marker);
-            var duration = session.Manifest.StopTimestampUtc.HasValue
-                ? session.Manifest.StopTimestampUtc.Value - session.Manifest.StartTimestampUtc
-                : DateTimeOffset.UtcNow - session.Manifest.StartTimestampUtc;
+            var duration = session.Manifest.SessionStopMonotonicTimestamp >
+                           session.Manifest.SessionStartMonotonicTimestamp &&
+                           session.Manifest.MonotonicClockFrequency > 0
+                ? TimeSpan.FromSeconds(
+                    (session.Manifest.SessionStopMonotonicTimestamp -
+                     session.Manifest.SessionStartMonotonicTimestamp) /
+                    (double)session.Manifest.MonotonicClockFrequency)
+                : session.Manifest.StopTimestampUtc.HasValue
+                    ? session.Manifest.StopTimestampUtc.Value - session.Manifest.StartTimestampUtc
+                    : DateTimeOffset.UtcNow - session.Manifest.StartTimestampUtc;
             ElapsedText.Text = FormatDuration(duration);
             BytesText.Text = _openedRawLength.Value.ToString("N0");
             MarkerCountText.Text = session.Markers.Count.ToString("N0");
