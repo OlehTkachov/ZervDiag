@@ -15,6 +15,7 @@ Require(Enum.GetValues<BusProtocol>().Contains(BusProtocol.Onk160Serial),
 Require(Enum.GetValues<BusProtocol>().Contains(BusProtocol.ClassicalCan),
     "Classical CAN protocol marker missing.");
 PcanInteropContractTests.Run();
+await Onk160ContinuousCaptureTests.RunAsync();
 Require(BuiltInProfiles.All.Count == 1, "The ONK-160 test profile set must remain unchanged.");
 var onk = BuiltInProfiles.All.Single(profile => profile.Id == "onk160s-02-ks55727");
 Require(onk.ConfirmedBitrate == 38_400, "ONK-160 bitrate must be 38400 bit/s.");
