@@ -114,7 +114,7 @@
                   GridLinesVisibility="Horizontal" CellEditEnding="MarkersGrid_CellEditEnding">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="55" IsReadOnly="True" />
-                <DataGridTextColumn Header="UTC timestamp" Binding="{Binding AbsoluteTimestampUtc, StringFormat=yyyy-MM-dd HH:mm:ss.fff}" Width="190" IsReadOnly="True" />
+                <DataGridTextColumn Header="UTC timestamp" Binding="{Binding AbsoluteTimestampUtc, StringFormat={}{0:yyyy-MM-dd HH:mm:ss.fff}}" Width="190" IsReadOnly="True" />
                 <DataGridTextColumn Header="От начала" Binding="{Binding RelativeTimeText}" Width="115" IsReadOnly="True" />
                 <DataGridTextColumn Header="RAW byte offset" Binding="{Binding RawByteOffset}" Width="120" IsReadOnly="True" />
                 <DataGridTextColumn Header="Метка" Binding="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Width="180" />
