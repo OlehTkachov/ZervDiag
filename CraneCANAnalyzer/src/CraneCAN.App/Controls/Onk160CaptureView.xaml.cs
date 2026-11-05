@@ -188,9 +188,11 @@ public partial class Onk160CaptureView : UserControl
             BytesText.Text = _openedRawLength.Value.ToString("N0");
             MarkerCountText.Text = session.Markers.Count.ToString("N0");
             SessionPathText.Text = session.RawPath;
-            StatusText.Text = session.Manifest.IsComplete
-                ? $"Сессия открыта: {Path.GetFileName(session.RawPath)}. RAW не загружался в RAM; доступны {session.Markers.Count:N0} меток."
-                : $"Открыта незавершённая сессия: RAW сейчас содержит {_openedRawLength.Value:N0} байт; manifest подтверждает {session.Manifest.TotalBytesWritten:N0} байт на последнем flush. Доступно меток: {session.Markers.Count:N0}.";
+            var integrityMatches = session.Manifest.TotalBytesReceived == session.Manifest.TotalBytesWritten &&
+                                   _openedRawLength.Value == session.Manifest.TotalBytesWritten;
+            StatusText.Text = session.Manifest.IsComplete && integrityMatches
+                ? $"Сессия открыта: {Path.GetFileName(session.RawPath)}. Проверка байтов OK ({session.Manifest.TotalBytesWritten:N0}); RAW не загружался в RAM; доступно {session.Markers.Count:N0} меток."
+                : $"Сессия неполная или имеет расхождение: получено {session.Manifest.TotalBytesReceived:N0}, подтверждено записью {session.Manifest.TotalBytesWritten:N0}, фактический RAW {_openedRawLength.Value:N0} байт. Доступно меток: {session.Markers.Count:N0}.";
         }
         catch (Exception exception)
         {
