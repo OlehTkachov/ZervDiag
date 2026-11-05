@@ -208,19 +208,19 @@ public partial class Onk160CaptureView : UserControl
         RefreshDisplay();
     }
 
-    private void GenericMarkButton_Click(object sender, RoutedEventArgs e) =>
-        AddMarker("MARK");
+    private async void GenericMarkButton_Click(object sender, RoutedEventArgs e) =>
+        await AddMarkerAsync("MARK");
 
-    private void QuickMarkerButton_Click(object sender, RoutedEventArgs e)
+    private async void QuickMarkerButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string label })
-            AddMarker(label);
+            await AddMarkerAsync(label);
     }
 
-    private void OtherButton_Click(object sender, RoutedEventArgs e)
+    private async void OtherButton_Click(object sender, RoutedEventArgs e)
     {
-        // Timestamp is fixed before the annotation dialog is shown.
-        var marker = AddMarker("OTHER");
+        // The capture service timestamps and persists the marker before this dialog is shown.
+        var marker = await AddMarkerAsync("OTHER");
         if (marker is null)
             return;
 
@@ -231,23 +231,24 @@ public partial class Onk160CaptureView : UserControl
         marker.Label = details.Value.Label;
         marker.Comment = details.Value.Comment;
         MarkersGrid.Items.Refresh();
-        _ = PersistMarkerEditsAsync();
+        await PersistMarkerEditsAsync();
     }
 
-    private Onk160CaptureMarker? AddMarker(string label)
+    private async Task<Onk160CaptureMarker?> AddMarkerAsync(string label)
     {
         try
         {
-            // The capture service takes UTC and monotonic timestamps before returning to the UI.
-            var marker = _capture.AddMarker(label);
+            StatusText.Text = $"Сохранение метки {label}…";
+            var marker = await _capture.AddMarkerAsync(label);
             _markers.Add(marker);
             MarkersGrid.ScrollIntoView(marker);
+            StatusText.Text = $"Метка #{marker.Id} сохранена.";
             RefreshDisplay();
             return marker;
         }
         catch (Exception exception)
         {
-            StatusText.Text = exception.Message;
+            StatusText.Text = "Не удалось сохранить метку: " + exception.Message;
             return null;
         }
     }
