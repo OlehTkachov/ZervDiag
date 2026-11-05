@@ -219,7 +219,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private string? _manifestPath;
     private string? _markersPath;
     private List<Onk160CaptureMarker> _markers = [];
-    private TaskCompletionSource? _idleBoundary;
+    private TaskCompletionSource<bool>? _idleBoundary;
     private long _sessionStartTimestamp;
     private long _bytesWritten;
     private int _isRecording;
@@ -229,6 +229,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
     public bool IsConnected => _port?.IsOpen == true;
     public bool IsRecording => Volatile.Read(ref _isRecording) == 1;
+    public bool HasOpenCapture => _rawStream is not null;
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
     public Exception? LastError => _lastError;
     public string? ConnectedPort => _port?.PortName;
@@ -310,13 +311,23 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _markersPath = sidecars.MarkersPath;
             _markers = [];
             _sessionStartTimestamp = Stopwatch.GetTimestamp();
-            _idleBoundary = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             _lastError = null;
             Interlocked.Exchange(ref _bytesWritten, 0);
             Volatile.Write(ref _isRecording, 1);
         }
 
-        await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            Volatile.Write(ref _isRecording, 0);
+            await rawStream.DisposeAsync().ConfigureAwait(false);
+            _rawStream = null;
+            throw;
+        }
         _maintenanceCancellation = new CancellationTokenSource();
         _maintenanceTask = Task.Run(
             () => MaintenanceLoopAsync(_maintenanceCancellation.Token), CancellationToken.None);
@@ -426,6 +437,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             {
                 try { await _maintenanceTask.ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
+                catch (Exception exception) { ReportFault(exception); }
             }
             _maintenanceCancellation.Dispose();
             _maintenanceCancellation = null;
@@ -501,7 +513,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 catch (TimeoutException)
                 {
                     if (!IsRecording)
-                        _idleBoundary?.TrySetResult();
+                        _idleBoundary?.TrySetResult(true);
                     continue;
                 }
 
@@ -513,7 +525,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             }
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested ||
-                                          exception is IOException or InvalidOperationException or ObjectDisposedException)
+                                          exception is IOException or InvalidOperationException)
         {
             if (!cancellationToken.IsCancellationRequested)
                 ReportFault(exception);
@@ -543,24 +555,34 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
     private async Task MaintenanceLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            await _fileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (_rawStream is not null)
+                await _fileGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
                 {
-                    await _rawStream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                    _rawStream.Flush(flushToDisk: true);
+                    if (_rawStream is not null)
+                    {
+                        await _rawStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                        _rawStream.Flush(flushToDisk: true);
+                    }
                 }
-            }
-            finally
-            {
-                _fileGate.Release();
-            }
+                finally
+                {
+                    _fileGate.Release();
+                }
 
-            await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+                await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ReportFault(exception);
         }
     }
 
