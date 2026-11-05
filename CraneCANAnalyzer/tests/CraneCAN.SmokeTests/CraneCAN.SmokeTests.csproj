@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CraneCAN.Core\CraneCAN.Core.csproj" />
     <ProjectReference Include="..\..\src\CraneCAN.Driver.PcanBasic\CraneCAN.Driver.PcanBasic.csproj" />
+    <ProjectReference Include="..\..\src\CraneCAN.Driver.Onk160\CraneCAN.Driver.Onk160.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Fixtures\*.trc">
