@@ -31,6 +31,7 @@ public sealed class Onk160CaptureSessionManifest
     public Guid SessionId { get; set; }
     public DateTimeOffset StartTimestampUtc { get; set; }
     public long SessionStartMonotonicTimestamp { get; set; }
+    public long SessionStopMonotonicTimestamp { get; set; }
     public long MonotonicClockFrequency { get; set; } = Stopwatch.Frequency;
     public DateTimeOffset? StopTimestampUtc { get; set; }
     public string ComPort { get; set; } = "";
@@ -118,7 +119,9 @@ public static class Onk160SessionStore
 
         if (manifest.SchemaVersion != 1)
             throw new FormatException($"Unsupported ONK-160 session schema: {manifest.SchemaVersion}.");
-        if (manifest.MonotonicClockFrequency <= 0 || manifest.SessionStartMonotonicTimestamp <= 0)
+        if (manifest.MonotonicClockFrequency <= 0 || manifest.SessionStartMonotonicTimestamp <= 0 ||
+            (manifest.SessionStopMonotonicTimestamp != 0 &&
+             manifest.SessionStopMonotonicTimestamp < manifest.SessionStartMonotonicTimestamp))
             throw new FormatException("Session monotonic clock metadata is invalid.");
         if (manifest.BaudRate != 38_400 || manifest.DataBits != 8 ||
             !string.Equals(manifest.Parity, "Even", StringComparison.OrdinalIgnoreCase) ||
@@ -523,6 +526,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             await idleBoundary.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // These timestamps identify the end of received input, not the end of disk finalization.
+        var stopTimestamp = DateTimeOffset.UtcNow;
+        var stopMonotonicTimestamp = Stopwatch.GetTimestamp();
+
         if (_maintenanceCancellation is not null)
         {
             _maintenanceCancellation.Cancel();
@@ -580,11 +587,11 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         var actualRawFileLength = rawPath is not null && File.Exists(rawPath)
             ? new FileInfo(rawPath).Length
             : -1;
-        var stopTimestamp = DateTimeOffset.UtcNow;
-        _sessionStopTimestamp = Stopwatch.GetTimestamp();
+        _sessionStopTimestamp = stopMonotonicTimestamp;
         lock (_stateLock)
         {
             _manifest.StopTimestampUtc = stopTimestamp;
+            _manifest.SessionStopMonotonicTimestamp = stopMonotonicTimestamp;
             _manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
             _manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
             _manifest.IsComplete = _lastError is null && finalizationError is null &&
@@ -930,6 +937,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         SessionId = manifest.SessionId,
         StartTimestampUtc = manifest.StartTimestampUtc,
         SessionStartMonotonicTimestamp = manifest.SessionStartMonotonicTimestamp,
+        SessionStopMonotonicTimestamp = manifest.SessionStopMonotonicTimestamp,
         MonotonicClockFrequency = manifest.MonotonicClockFrequency,
         StopTimestampUtc = manifest.StopTimestampUtc,
         ComPort = manifest.ComPort,
