@@ -51,7 +51,7 @@ Write-Host "Restoring self-contained Windows x64 assets..."
 & dotnet restore $appProject -r win-x64 -p:SelfContained=true
 Assert-DotNetSuccess "Windows x64 restore"
 
-Write-Host "Publishing CraneCAN 0.7 Live Guided Diagnostics..."
+Write-Host "Publishing CraneCAN 0.8.0-dev — Live Guided Diagnostics + ONK-160 Capture..."
 & dotnet publish $appProject `
     -c Release `
     -r win-x64 `
