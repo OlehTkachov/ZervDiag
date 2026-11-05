@@ -320,7 +320,7 @@ public partial class Onk160CaptureView : UserControl
         var connected = _capture.IsConnected;
         var recording = _capture.IsRecording;
         var hasOpenCapture = _capture.HasOpenCapture;
-        ConnectButton.IsEnabled = !connected;
+        ConnectButton.IsEnabled = !connected && !hasOpenCapture;
         RefreshPortsButton.IsEnabled = !connected;
         ComPortCombo.IsEnabled = !connected;
         DisconnectButton.IsEnabled = connected && !hasOpenCapture;
