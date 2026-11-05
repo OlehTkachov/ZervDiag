@@ -211,14 +211,49 @@ public static class Onk160SessionStore
 /// the CAN Live capture path. While connected, the reader continuously drains the COM port;
 /// bytes are written only while a recording session is active.
 /// </summary>
+public interface IOnk160ByteSource : IDisposable
+{
+    string PortName { get; }
+    bool IsOpen { get; }
+    void Open();
+    int Read(byte[] buffer, int offset, int count);
+    void Close();
+}
+
+internal sealed class SerialPortOnk160ByteSource : IOnk160ByteSource
+{
+    private readonly SerialPort _port;
+
+    public SerialPortOnk160ByteSource(string portName)
+    {
+        _port = new SerialPort(portName, Onk160ContinuousCapture.RequiredBaudRate, Parity.Even, 8, StopBits.One)
+        {
+            Handshake = Handshake.None,
+            DtrEnable = false,
+            RtsEnable = false,
+            ReadBufferSize = 65_536,
+            ReadTimeout = 100,
+            WriteTimeout = 100,
+            ParityReplace = 0
+        };
+    }
+
+    public string PortName => _port.PortName;
+    public bool IsOpen => _port.IsOpen;
+    public void Open() => _port.Open();
+    public int Read(byte[] buffer, int offset, int count) => _port.Read(buffer, offset, count);
+    public void Close() => _port.Close();
+    public void Dispose() => _port.Dispose();
+}
 public sealed class Onk160ContinuousCapture : IAsyncDisposable
 {
     public const int RequiredBaudRate = 38_400;
 
+    private readonly Func<string, IOnk160ByteSource> _sourceFactory;
     private readonly object _stateLock = new();
     private readonly SemaphoreSlim _fileGate = new(1, 1);
     private readonly SemaphoreSlim _metadataGate = new(1, 1);
-    private SerialPort? _port;
+    private IOnk160ByteSource? _source;
     private CancellationTokenSource? _readerCancellation;
     private Task? _readerTask;
     private CancellationTokenSource? _maintenanceCancellation;
@@ -240,15 +275,20 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private int _isRecording;
     private Exception? _lastError;
 
+    public Onk160ContinuousCapture(Func<string, IOnk160ByteSource>? sourceFactory = null)
+    {
+        _sourceFactory = sourceFactory ?? (portName => new SerialPortOnk160ByteSource(portName));
+    }
+
     public event Action<Exception>? Faulted;
 
-    public bool IsConnected => _port?.IsOpen == true;
+    public bool IsConnected => _source?.IsOpen == true;
     public bool IsRecording => Volatile.Read(ref _isRecording) == 1;
     public bool HasOpenCapture => _rawStream is not null;
     public long BytesReceived => Interlocked.Read(ref _bytesReceived);
     public long BytesWritten => Interlocked.Read(ref _bytesWritten);
     public Exception? LastError => _lastError;
-    public string? ConnectedPort => _port?.PortName;
+    public string? ConnectedPort => _source?.PortName;
     public Onk160CaptureSessionManifest? CurrentManifest => _manifest;
     public string? CurrentManifestPath => _manifestPath;
     public string? CurrentRawPath => _manifest is null || _manifestPath is null
@@ -277,42 +317,31 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _readerCancellation?.Dispose();
             _readerCancellation = null;
             _readerTask = null;
-            try { _port?.Dispose(); } catch { }
-            _port = null;
+            try { _source?.Dispose(); } catch { }
+            _source = null;
         }
 
-        var port = new SerialPort(portName.Trim(), RequiredBaudRate, Parity.Even, 8, StopBits.One)
-        {
-            Handshake = Handshake.None,
-            DtrEnable = false,
-            RtsEnable = false,
-            ReadBufferSize = 65_536,
-            ReadTimeout = 100,
-            WriteTimeout = 100,
-            ParityReplace = 0
-        };
-
+        var source = _sourceFactory(portName.Trim());
         try
         {
-            port.Open();
+            source.Open();
         }
         catch
         {
-            port.Dispose();
+            source.Dispose();
             throw;
         }
-        _port = port;
+        _source = source;
         _lastError = null;
         var readerCancellation = new CancellationTokenSource();
         _readerCancellation = readerCancellation;
-        _readerTask = Task.Run(() => ReadLoopAsync(port, readerCancellation.Token), CancellationToken.None);
+        _readerTask = Task.Run(() => ReadLoopAsync(source, readerCancellation.Token), CancellationToken.None);
         return Task.CompletedTask;
     }
-
     public async Task StartRecordingAsync(string rawPath, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IsConnected || _port is null)
+        if (!IsConnected || _source is null)
             throw new InvalidOperationException("Connect to the ONK-160 COM port before recording.");
         if (IsRecording || _rawStream is not null)
             throw new InvalidOperationException("An ONK-160 recording is already active.");
@@ -332,7 +361,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             SessionId = Guid.NewGuid(),
             StartTimestampUtc = now,
-            ComPort = _port.PortName,
+            ComPort = _source.PortName,
             RawFileName = Path.GetFileName(fullRawPath),
             MarkersFileName = Path.GetFileName(sidecars.MarkersPath)
         };
@@ -568,12 +597,12 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
         finally
         {
-            var port = _port;
-            _port = null;
+            var source = _source;
+            _source = null;
             if (_readerCancellation is not null)
             {
                 _readerCancellation.Cancel();
-                try { port?.Close(); } catch { }
+                try { source?.Close(); } catch { }
                 if (_readerTask is not null)
                 {
                     try { await _readerTask.ConfigureAwait(false); }
@@ -584,14 +613,13 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 _readerCancellation = null;
                 _readerTask = null;
             }
-            try { port?.Dispose(); }
+            try { source?.Dispose(); }
             catch (Exception exception) { stopError ??= exception; }
         }
 
         if (stopError is not null)
             throw stopError;
     }
-
     public async ValueTask DisposeAsync()
     {
         await DisconnectAsync().ConfigureAwait(false);
@@ -599,7 +627,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         _metadataGate.Dispose();
     }
 
-    private async Task ReadLoopAsync(SerialPort port, CancellationToken cancellationToken)
+    private async Task ReadLoopAsync(IOnk160ByteSource source, CancellationToken cancellationToken)
     {
         var buffer = new byte[8192];
         try
@@ -610,7 +638,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                 int count;
                 try
                 {
-                    count = port.Read(buffer, 0, buffer.Length);
+                    count = source.Read(buffer, 0, buffer.Length);
                 }
                 catch (TimeoutException)
                 {
@@ -635,7 +663,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             if (!cancellationToken.IsCancellationRequested)
             {
                 ReportFault(exception);
-                try { port.Close(); } catch { }
+                try { source.Close(); } catch { }
             }
         }
         catch (Exception exception)
