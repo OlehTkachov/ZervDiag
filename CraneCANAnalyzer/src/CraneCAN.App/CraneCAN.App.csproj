@@ -25,6 +25,12 @@
     <ProjectReference Include="..\CraneCAN.Driver.Onk160\CraneCAN.Driver.Onk160.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\..\docs\ONK160_CONTINUOUS_CAPTURE.md">
+      <Link>docs\ONK160_CONTINUOUS_CAPTURE.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <TargetPath>docs\ONK160_CONTINUOUS_CAPTURE.md</TargetPath>
+    </Content>
     <Content Include="..\..\README.md">
       <Link>README.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
