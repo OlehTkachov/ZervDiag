@@ -281,6 +281,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private long _markerRevision;
     private long _persistedMarkerRevision;
     private int _markerPersistenceWorker;
+    private TaskCompletionSource<bool> _markerPersistencePulse = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _isRecording;
     private int _stopRequested;
     private Exception? _lastError;
@@ -419,44 +420,52 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             throw;
         }
 
+        Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
+        SignalMarkerPersistenceProgress();
         Volatile.Write(ref _isRecording, 1);
         _maintenanceCancellation = new CancellationTokenSource();
         _maintenanceTask = Task.Run(
             () => MaintenanceLoopAsync(_maintenanceCancellation.Token), CancellationToken.None);
     }
 
-    /// <summary>Captures timestamps and byte offset before any UI work is performed.</summary>
-    public Onk160CaptureMarker AddMarker(string label, string? comment = null)
+    /// <summary>Captures the marker timestamp immediately, then asynchronously confirms its sidecar persistence.</summary>
+    public async Task<Onk160CaptureMarker> AddMarkerAsync(
+        string label,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
     {
+        // These values are captured before waiting for locks, disk I/O or UI annotation.
         var absoluteTimestamp = DateTimeOffset.UtcNow;
         var monotonicTimestamp = Stopwatch.GetTimestamp();
         var byteOffset = Interlocked.Read(ref _bytesWritten);
         if (!IsRecording || _manifest is null)
             throw new InvalidOperationException("Start an ONK-160 recording before adding markers.");
 
-        var marker = new Onk160CaptureMarker
-        {
-            Id = 1,
-            AbsoluteTimestampUtc = absoluteTimestamp,
-            MonotonicTimestamp = monotonicTimestamp,
-            RelativeMilliseconds = Stopwatch.GetElapsedTime(
-                _sessionStartTimestamp, monotonicTimestamp).TotalMilliseconds,
-            RawByteOffset = byteOffset,
-            Label = string.IsNullOrWhiteSpace(label) ? "MARK" : label.Trim(),
-            Comment = comment?.Trim() ?? ""
-        };
-
+        Onk160CaptureMarker marker;
+        long revision;
         lock (_stateLock)
         {
-            marker.Id = _markers.Count == 0 ? 1 : _markers[^1].Id + 1;
+            if (!IsRecording || _manifest is null)
+                throw new InvalidOperationException("The ONK-160 recording has already stopped.");
+            marker = new Onk160CaptureMarker
+            {
+                Id = _markers.Count == 0 ? 1 : _markers[^1].Id + 1,
+                AbsoluteTimestampUtc = absoluteTimestamp,
+                MonotonicTimestamp = monotonicTimestamp,
+                RelativeMilliseconds = Stopwatch.GetElapsedTime(
+                    _sessionStartTimestamp, monotonicTimestamp).TotalMilliseconds,
+                RawByteOffset = byteOffset,
+                Label = string.IsNullOrWhiteSpace(label) ? "MARK" : label.Trim(),
+                Comment = comment?.Trim() ?? ""
+            };
             _markers.Add(marker);
-            Interlocked.Increment(ref _markerRevision);
+            revision = Interlocked.Increment(ref _markerRevision);
         }
 
         QueueMarkerPersistence();
+        await WaitForMarkerRevisionAsync(revision, cancellationToken).ConfigureAwait(false);
         return marker;
     }
-
     public IReadOnlyList<Onk160CaptureMarker> GetMarkers()
     {
         lock (_stateLock)
@@ -483,6 +492,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
         await PersistMarkersSafelyAsync(cancellationToken).ConfigureAwait(false);
         Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
+        SignalMarkerPersistenceProgress();
     }
 
     public TimeSpan GetElapsed()
@@ -589,6 +599,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         try
         {
             await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
+            SignalMarkerPersistenceProgress();
         }
         catch (Exception exception)
         {
@@ -811,6 +823,31 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
     }
 
+    private async Task WaitForMarkerRevisionAsync(long revision, CancellationToken cancellationToken)
+    {
+        while (Interlocked.Read(ref _persistedMarkerRevision) < revision)
+        {
+            if (_lastError is not null)
+                throw new IOException("ONK-160 marker could not be persisted.", _lastError);
+            Task waitTask;
+            lock (_stateLock)
+                waitTask = _markerPersistencePulse.Task;
+            if (Interlocked.Read(ref _persistedMarkerRevision) >= revision)
+                break;
+            await waitTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private void SignalMarkerPersistenceProgress()
+    {
+        TaskCompletionSource<bool> pulse;
+        lock (_stateLock)
+        {
+            pulse = _markerPersistencePulse;
+            _markerPersistencePulse = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        pulse.TrySetResult(true);
+    }
     private async Task WaitForMarkerPersistenceAsync(CancellationToken cancellationToken)
     {
         while (Volatile.Read(ref _markerPersistenceWorker) == 1)
@@ -837,6 +874,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
                 await PersistMetadataAsync().ConfigureAwait(false);
                 Interlocked.Exchange(ref _persistedMarkerRevision, targetRevision);
+                SignalMarkerPersistenceProgress();
             }
         }
         catch (Exception exception)
@@ -871,6 +909,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         Volatile.Write(ref _isRecording, 0);
         Volatile.Write(ref _stopRequested, 1);
         try { Faulted?.Invoke(exception); } catch { }
+        SignalMarkerPersistenceProgress();
         _idleBoundary?.TrySetResult(true);
     }
 
