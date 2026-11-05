@@ -229,6 +229,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private long _sessionStartTimestamp;
     private long _sessionStopTimestamp;
     private long _bytesWritten;
+    private long _lastDurableBytes;
     private int _isRecording;
     private Exception? _lastError;
 
@@ -332,6 +333,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _idleBoundary = null;
             _lastError = null;
             Interlocked.Exchange(ref _bytesWritten, 0);
+            Interlocked.Exchange(ref _lastDurableBytes, 0);
             Volatile.Write(ref _isRecording, 1);
         }
 
@@ -468,6 +470,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             {
                 await _rawStream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 _rawStream.Flush(flushToDisk: true);
+                Interlocked.Exchange(ref _lastDurableBytes, Interlocked.Read(ref _bytesWritten));
                 await _rawStream.DisposeAsync().ConfigureAwait(false);
                 _rawStream = null;
             }
@@ -480,7 +483,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         lock (_stateLock)
         {
             _manifest.StopTimestampUtc = stopTimestamp;
-            _manifest.TotalBytesWritten = Interlocked.Read(ref _bytesWritten);
+            _manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
             _manifest.IsComplete = _lastError is null;
         }
         await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
@@ -588,6 +591,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                     {
                         await _rawStream.FlushAsync(cancellationToken).ConfigureAwait(false);
                         _rawStream.Flush(flushToDisk: true);
+                        Interlocked.Exchange(ref _lastDurableBytes, Interlocked.Read(ref _bytesWritten));
                     }
                 }
                 finally
@@ -622,7 +626,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             Onk160CaptureMarker[] markerSnapshot;
             lock (_stateLock)
             {
-                manifest.TotalBytesWritten = Interlocked.Read(ref _bytesWritten);
+                manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
                 manifestSnapshot = CloneManifest(manifest);
                 markerSnapshot = _markers.Select(CloneMarker).ToArray();
             }
