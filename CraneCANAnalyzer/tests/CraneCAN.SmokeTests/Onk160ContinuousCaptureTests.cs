@@ -107,6 +107,11 @@ internal static class Onk160ContinuousCaptureTests
             }
 
             await Task.WhenAll(markerTasks);
+            var activeManifestPath = capture.CurrentManifestPath
+                ?? throw new InvalidOperationException("Active capture manifest path is missing.");
+            var activeSession = await Onk160SessionStore.LoadAsync(activeManifestPath);
+            Require(activeSession.Markers.Count == 1_000,
+                "AddMarkerAsync returned before all marker sidecars were persisted.");
 
             // Put the final chunk into the source immediately before STOP. The reader must
             // drain bytes already buffered by the source before closing the RAW file.
