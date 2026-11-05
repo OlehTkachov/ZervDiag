@@ -24,7 +24,7 @@ internal static class Onk160ContinuousCaptureTests
 
             var (manifestPath, markersPath) = Onk160SessionStore.GetSidecarPaths(rawPath);
             var sessionId = Guid.NewGuid();
-            var start = DateTimeOffset.Parse("2026-11-05T08:31:00.000+02:00");
+            var start = DateTimeOffset.Parse("2026-11-05T06:31:00.000Z");
             var markers = Enumerable.Range(1, 1_000).Select(index => new Onk160CaptureMarker
             {
                 Id = index,
