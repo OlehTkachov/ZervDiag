@@ -232,6 +232,9 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
     private long _sessionStopTimestamp;
     private long _bytesWritten;
     private long _lastDurableBytes;
+    private long _markerRevision;
+    private long _persistedMarkerRevision;
+    private int _markerPersistenceWorker;
     private int _isRecording;
     private Exception? _lastError;
 
@@ -338,6 +341,9 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _manifestPath = sidecars.ManifestPath;
             _markersPath = sidecars.MarkersPath;
             _markers = [];
+            Interlocked.Exchange(ref _markerRevision, 0);
+            Interlocked.Exchange(ref _persistedMarkerRevision, 0);
+            Interlocked.Exchange(ref _markerPersistenceWorker, 0);
             _sessionStartTimestamp = Stopwatch.GetTimestamp();
             _sessionStopTimestamp = 0;
             _idleBoundary = null;
@@ -400,9 +406,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             marker.Id = _markers.Count == 0 ? 1 : _markers[^1].Id + 1;
             _markers.Add(marker);
+            Interlocked.Increment(ref _markerRevision);
         }
 
-        _ = Task.Run(() => PersistMarkersSafelyAsync());
+        QueueMarkerPersistence();
         return marker;
     }
 
@@ -428,8 +435,10 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                     marker.Comment = edited.Comment;
                 }
             }
+            Interlocked.Increment(ref _markerRevision);
         }
         await PersistMarkersSafelyAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Exchange(ref _persistedMarkerRevision, Interlocked.Read(ref _markerRevision));
     }
 
     public TimeSpan GetElapsed()
@@ -710,6 +719,41 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
     }
 
+    private void QueueMarkerPersistence()
+    {
+        if (!IsRecording || _lastError is not null)
+            return;
+
+        if (Interlocked.CompareExchange(ref _markerPersistenceWorker, 1, 0) == 0)
+            _ = Task.Run(PersistMarkerWorkerAsync);
+    }
+
+    private async Task PersistMarkerWorkerAsync()
+    {
+        try
+        {
+            while (IsRecording && _lastError is null)
+            {
+                var targetRevision = Interlocked.Read(ref _markerRevision);
+                if (targetRevision == Interlocked.Read(ref _persistedMarkerRevision))
+                    break;
+
+                await PersistMetadataAsync().ConfigureAwait(false);
+                Interlocked.Exchange(ref _persistedMarkerRevision, targetRevision);
+            }
+        }
+        catch (Exception exception)
+        {
+            ReportFault(exception);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _markerPersistenceWorker, 0);
+            if (IsRecording && _lastError is null &&
+                Interlocked.Read(ref _markerRevision) != Interlocked.Read(ref _persistedMarkerRevision))
+                QueueMarkerPersistence();
+        }
+    }
     private async Task PersistMarkersSafelyAsync(CancellationToken cancellationToken = default)
     {
         try
