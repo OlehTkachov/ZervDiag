@@ -207,9 +207,7 @@ public static class Onk160SessionStore
 }
 
 /// <summary>
-/// Dedicated ONK-160 byte capture. It never invokes the packet decoder and does not share
-/// the CAN Live capture path. While connected, the reader continuously drains the COM port;
-/// bytes are written only while a recording session is active.
+/// Minimal byte-oriented source contract. The recorder does not depend on packet decoding.
 /// </summary>
 public interface IOnk160ByteSource : IDisposable
 {
@@ -247,6 +245,11 @@ internal sealed class SerialPortOnk160ByteSource : IOnk160ByteSource
     public void Close() => _port.Close();
     public void Dispose() => _port.Dispose();
 }
+/// <summary>
+/// Dedicated ONK-160 byte capture. It never invokes the packet decoder and does not share
+/// the CAN Live capture path. While connected, the reader continuously drains the source;
+/// during STOP it drains bytes already buffered by the source before closing the RAW file.
+/// </summary>
 public sealed class Onk160ContinuousCapture : IAsyncDisposable
 {
     public const int RequiredBaudRate = 38_400;
@@ -498,7 +501,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         if (_rawStream is null || _manifest is null)
             return;
 
-        // The STOP timestamp is captured before waiting for the reader or disk.
+        // STOP drains the source's already-buffered bytes; the session stop timestamp is set after that boundary.
         var idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _idleBoundary = idleBoundary;
         Volatile.Write(ref _isRecording, 0);
