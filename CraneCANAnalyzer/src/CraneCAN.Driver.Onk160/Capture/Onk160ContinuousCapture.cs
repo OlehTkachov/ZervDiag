@@ -13,8 +13,14 @@ public sealed class Onk160CaptureMarker
     public long RawByteOffset { get; set; }
     public string Label { get; set; } = "MARK";
     public string Comment { get; set; } = "";
-    public string RelativeTimeText => TimeSpan.FromMilliseconds(Math.Max(0, RelativeMilliseconds))
-        .ToString(@"hh\:mm\:ss\.fff");
+    public string RelativeTimeText
+    {
+        get
+        {
+            var time = TimeSpan.FromMilliseconds(Math.Max(0, RelativeMilliseconds));
+            return $"{(int)time.TotalHours:00}:{time.Minutes:00}:{time.Seconds:00}.{time.Milliseconds:000}";
+        }
+    }
 }
 
 public sealed class Onk160CaptureSessionManifest
@@ -270,8 +276,9 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         port.Open();
         _port = port;
         _lastError = null;
-        _readerCancellation = new CancellationTokenSource();
-        _readerTask = Task.Run(() => ReadLoopAsync(port, _readerCancellation.Token), CancellationToken.None);
+        var readerCancellation = new CancellationTokenSource();
+        _readerCancellation = readerCancellation;
+        _readerTask = Task.Run(() => ReadLoopAsync(port, readerCancellation.Token), CancellationToken.None);
         return Task.CompletedTask;
     }
 
@@ -311,7 +318,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             _markersPath = sidecars.MarkersPath;
             _markers = [];
             _sessionStartTimestamp = Stopwatch.GetTimestamp();
-            _idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _idleBoundary = null;
             _lastError = null;
             Interlocked.Exchange(ref _bytesWritten, 0);
             Volatile.Write(ref _isRecording, 1);
@@ -414,7 +421,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
 
         // The STOP timestamp is captured before waiting for the reader or disk.
         var stopTimestamp = DateTimeOffset.UtcNow;
-        var idleBoundary = _idleBoundary;
+        var idleBoundary = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _idleBoundary = idleBoundary;
         Volatile.Write(ref _isRecording, 0);
 
         if (idleBoundary is not null && _readerTask is { IsCompleted: false })
@@ -528,11 +536,15 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                                           exception is IOException or InvalidOperationException)
         {
             if (!cancellationToken.IsCancellationRequested)
+            {
                 ReportFault(exception);
+                try { port.Close(); } catch { }
+            }
         }
         catch (Exception exception)
         {
             ReportFault(exception);
+            try { port.Close(); } catch { }
         }
     }
 
