@@ -30,6 +30,8 @@ public sealed class Onk160CaptureSessionManifest
     public int SchemaVersion { get; set; } = 1;
     public Guid SessionId { get; set; }
     public DateTimeOffset StartTimestampUtc { get; set; }
+    public long SessionStartMonotonicTimestamp { get; set; }
+    public long MonotonicClockFrequency { get; set; } = Stopwatch.Frequency;
     public DateTimeOffset? StopTimestampUtc { get; set; }
     public string ComPort { get; set; } = "";
     public int BaudRate { get; set; } = 38_400;
@@ -116,6 +118,8 @@ public static class Onk160SessionStore
 
         if (manifest.SchemaVersion != 1)
             throw new FormatException($"Unsupported ONK-160 session schema: {manifest.SchemaVersion}.");
+        if (manifest.MonotonicClockFrequency <= 0 || manifest.SessionStartMonotonicTimestamp <= 0)
+            throw new FormatException("Session monotonic clock metadata is invalid.");
         if (manifest.BaudRate != 38_400 || manifest.DataBits != 8 ||
             !string.Equals(manifest.Parity, "Even", StringComparison.OrdinalIgnoreCase) ||
             manifest.StopBits != 1)
@@ -368,6 +372,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             SessionId = Guid.NewGuid(),
             StartTimestampUtc = now,
+            SessionStartMonotonicTimestamp = Stopwatch.GetTimestamp(),
+            MonotonicClockFrequency = Stopwatch.Frequency,
             ComPort = _source.PortName,
             RawFileName = Path.GetFileName(fullRawPath),
             MarkersFileName = Path.GetFileName(sidecars.MarkersPath)
@@ -383,7 +389,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
             Interlocked.Exchange(ref _markerRevision, 0);
             Interlocked.Exchange(ref _persistedMarkerRevision, 0);
             Interlocked.Exchange(ref _markerPersistenceWorker, 0);
-            _sessionStartTimestamp = Stopwatch.GetTimestamp();
+            _sessionStartTimestamp = manifest.SessionStartMonotonicTimestamp;
             _sessionStopTimestamp = 0;
             _idleBoundary = null;
             _lastError = null;
@@ -852,6 +858,8 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         SchemaVersion = manifest.SchemaVersion,
         SessionId = manifest.SessionId,
         StartTimestampUtc = manifest.StartTimestampUtc,
+        SessionStartMonotonicTimestamp = manifest.SessionStartMonotonicTimestamp,
+        MonotonicClockFrequency = manifest.MonotonicClockFrequency,
         StopTimestampUtc = manifest.StopTimestampUtc,
         ComPort = manifest.ComPort,
         BaudRate = manifest.BaudRate,
