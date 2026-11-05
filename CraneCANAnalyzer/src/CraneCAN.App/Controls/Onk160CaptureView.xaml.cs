@@ -34,6 +34,7 @@ public partial class Onk160CaptureView : UserControl
     public async Task StopOnWindowCloseAsync()
     {
         _timer.Stop();
+        await CommitAndPersistMarkerEditsAsync();
         try
         {
             await _capture.StopRecordingAsync();
@@ -117,6 +118,7 @@ public partial class Onk160CaptureView : UserControl
 
         try
         {
+            await CommitAndPersistMarkerEditsAsync();
             await _capture.StartRecordingAsync(dialog.FileName);
             _openedSession = null;
             _markers.Clear();
@@ -136,6 +138,7 @@ public partial class Onk160CaptureView : UserControl
     {
         try
         {
+            await CommitAndPersistMarkerEditsAsync();
             await _capture.StopRecordingAsync();
             StatusText.Text = _capture.LastError is null
                 ? "Запись остановлена. RAW и метки сохранены."
@@ -169,6 +172,7 @@ public partial class Onk160CaptureView : UserControl
 
         try
         {
+            await CommitAndPersistMarkerEditsAsync();
             var session = await Onk160SessionStore.LoadAsync(dialog.FileName);
             _openedSession = session;
             _markers.Clear();
@@ -282,6 +286,13 @@ public partial class Onk160CaptureView : UserControl
 
     private void MarkersGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e) =>
         Dispatcher.BeginInvoke(new Action(async () => await PersistMarkerEditsAsync()));
+
+    private async Task CommitAndPersistMarkerEditsAsync()
+    {
+        MarkersGrid.CommitEdit(DataGridEditingUnit.Cell, exitEditingMode: true);
+        MarkersGrid.CommitEdit(DataGridEditingUnit.Row, exitEditingMode: true);
+        await PersistMarkerEditsAsync();
+    }
 
     private async Task PersistMarkerEditsAsync()
     {
