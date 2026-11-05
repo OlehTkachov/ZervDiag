@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -58,6 +59,36 @@ public partial class MainWindow : Window
         ApplyProfileToFields();
         LoadFieldGuide();
         InitializeLiveGuided();
+    }
+
+
+    private bool _closeAfterOnkShutdown;
+
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_closeAfterOnkShutdown)
+            return;
+
+        e.Cancel = true;
+        IsEnabled = false;
+        try
+        {
+            await Onk160CaptureTab.StopOnWindowCloseAsync();
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                "Ошибка завершения ONK-160 Capture: " + exception.Message +
+                Environment.NewLine + "Проверьте сохранённые RAW и JSON-файлы.",
+                "Завершение ZervDiag",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _closeAfterOnkShutdown = true;
+            Close();
+        }
     }
 
     private async void OpenTrcButton_Click(object sender, RoutedEventArgs e)
