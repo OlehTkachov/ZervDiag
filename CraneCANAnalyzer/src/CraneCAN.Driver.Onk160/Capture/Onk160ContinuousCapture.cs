@@ -196,6 +196,7 @@ public static class Onk160SessionStore
     private static void ValidateSidecarName(string fileName, string propertyName)
     {
         if (string.IsNullOrWhiteSpace(fileName) ||
+            fileName is "." or ".." ||
             Path.IsPathRooted(fileName) ||
             !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal))
             throw new FormatException($"Invalid session sidecar name: {propertyName}.");
@@ -204,11 +205,20 @@ public static class Onk160SessionStore
     private static void ValidateMarkers(IReadOnlyList<Onk160CaptureMarker> markers)
     {
         long previousId = 0;
+        long previousMonotonicTimestamp = 0;
+        long previousRawByteOffset = 0;
         foreach (var marker in markers)
         {
-            if (marker.Id <= previousId || marker.RelativeMilliseconds < 0 || marker.RawByteOffset < 0)
-                throw new FormatException("ONK-160 markers contain invalid IDs or timeline offsets.");
+            if (marker.Id <= previousId ||
+                marker.MonotonicTimestamp < previousMonotonicTimestamp ||
+                marker.RelativeMilliseconds < 0 ||
+                !double.IsFinite(marker.RelativeMilliseconds) ||
+                marker.RawByteOffset < previousRawByteOffset ||
+                marker.AbsoluteTimestampUtc.Offset != TimeSpan.Zero)
+                throw new FormatException("ONK-160 markers contain invalid IDs, timestamps or timeline offsets.");
             previousId = marker.Id;
+            previousMonotonicTimestamp = marker.MonotonicTimestamp;
+            previousRawByteOffset = marker.RawByteOffset;
         }
     }
 }
@@ -435,10 +445,6 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         string? comment = null,
         CancellationToken cancellationToken = default)
     {
-        // These values are captured before waiting for locks, disk I/O or UI annotation.
-        var absoluteTimestamp = DateTimeOffset.UtcNow;
-        var monotonicTimestamp = Stopwatch.GetTimestamp();
-        var byteOffset = Interlocked.Read(ref _bytesWritten);
         if (!IsRecording || _manifest is null)
             throw new InvalidOperationException("Start an ONK-160 recording before adding markers.");
 
@@ -448,6 +454,12 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         {
             if (!IsRecording || _manifest is null)
                 throw new InvalidOperationException("The ONK-160 recording has already stopped.");
+
+            // Capture the event while holding only the small in-memory state lock.
+            // This preserves marker ID, monotonic time and RAW offset ordering under concurrent clicks.
+            var absoluteTimestamp = DateTimeOffset.UtcNow;
+            var monotonicTimestamp = Stopwatch.GetTimestamp();
+            var byteOffset = Interlocked.Read(ref _bytesWritten);
             marker = new Onk160CaptureMarker
             {
                 Id = _markers.Count == 0 ? 1 : _markers[^1].Id + 1,
