@@ -734,7 +734,7 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
                     _fileGate.Release();
                 }
 
-                await PersistMetadataAsync(cancellationToken).ConfigureAwait(false);
+                await PersistManifestOnlyAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -746,6 +746,31 @@ public sealed class Onk160ContinuousCapture : IAsyncDisposable
         }
     }
 
+    private async Task PersistManifestOnlyAsync(CancellationToken cancellationToken = default)
+    {
+        var manifest = _manifest;
+        var manifestPath = _manifestPath;
+        if (manifest is null || manifestPath is null)
+            return;
+
+        await _metadataGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Onk160CaptureSessionManifest snapshot;
+            lock (_stateLock)
+            {
+                manifest.TotalBytesReceived = Interlocked.Read(ref _bytesReceived);
+                manifest.TotalBytesWritten = Interlocked.Read(ref _lastDurableBytes);
+                snapshot = CloneManifest(manifest);
+            }
+            await Onk160SessionStore.SaveManifestAsync(manifestPath, snapshot, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _metadataGate.Release();
+        }
+    }
     private async Task PersistMetadataAsync(CancellationToken cancellationToken = default)
     {
         var manifest = _manifest;
