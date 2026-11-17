@@ -20,7 +20,8 @@ def _folder_title_label(main_window):
     if right_layout is None:
         return None
 
-    item = right_layout.itemAt(0)
+    # The library selector occupies the first row; the folder title is next.
+    item = right_layout.itemAt(1)
     widget = item.widget() if item else None
     return widget if isinstance(widget, QLabel) else None
 
@@ -49,7 +50,13 @@ def apply_main_window_language(main_window):
     else:
         main_window.update_ocr_button()
 
-    main_window.btn_folder.setText(tr("nav.choose_folder", language))
+    main_window.btn_folder.setText(tr("nav.choose_library_folder", language))
+    if hasattr(main_window, "btn_add_library"):
+        main_window.btn_add_library.setText(tr("nav.add_library", language))
+    if hasattr(main_window, "btn_compare_databases"):
+        main_window.btn_compare_databases.setText(tr("nav.compare_libraries", language))
+    if hasattr(main_window, "library_title_label"):
+        main_window.library_title_label.setText(tr("search.library", language))
     main_window.btn_duplicates.setText(tr("nav.duplicates", language))
     main_window.btn_settings.setText(tr("nav.settings", language))
 
@@ -60,7 +67,11 @@ def apply_main_window_language(main_window):
     if folder_title is not None:
         folder_title.setText(tr("search.folder", language))
 
-    folder = main_window.settings.value("documentation_folder", "")
+    try:
+        from database.libraries import get_active_library
+        folder = get_active_library().get("source_folder", "")
+    except Exception:
+        folder = ""
     if not folder:
         main_window.folder_label.setText(tr("search.no_folder", language))
 
@@ -164,6 +175,13 @@ def install_localization(main_window):
             return
 
         language = dialog.save()
+
+        # A database import from Settings is staged rather than swapping a
+        # live SQLite file. Save the other settings first, then close cleanly;
+        # ui.first_run applies the verified database on the next launch.
+        if dialog.restart_requested:
+            main_window.close()
+            return
 
         controller = getattr(
             main_window,

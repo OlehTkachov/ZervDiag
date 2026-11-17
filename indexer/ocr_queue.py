@@ -186,46 +186,47 @@ def _save_page(
 def _finish_file(
     file_id,
 ):
+    """
+    Завершает OCR тем же критерием полезного текста,
+    который использует обычная индексация: Python str.strip().
+
+    SQLite trim() без явного набора символов не удаляет все
+    переводы строк/табуляции, поэтому раньше OCR мог пометить как
+    ok строку из служебного whitespace, а следующий индекс снова
+    отправлял тот же файл в OCR.
+    """
+
     conn = get_connection()
 
     try:
         row = conn.execute(
             """
-            SELECT
-                length(
-                    trim(
-                        COALESCE(
-                            content,
-                            ''
-                        )
-                    )
-                )
+            SELECT content
             FROM files
             WHERE id = ?
             """,
             (file_id,),
         ).fetchone()
 
-        chars = (
-            int(
-                row[0] or 0
-            )
-            if row
-            else 0
+        content = (
+            row[0]
+            if row and row[0]
+            else ""
         )
 
-        if (
-            chars
-            >= MIN_CONTENT_CHARS
-        ):
+        chars = len(
+            content.strip()
+        )
+
+        if chars >= MIN_CONTENT_CHARS:
             status = "ok"
             error = None
 
         else:
             status = "error"
             error = (
-                "OCR не извлёк "
-                "достаточно текста"
+                "OCR не извлёк достаточно текста: "
+                f"{chars} символов"
             )
 
         conn.execute(

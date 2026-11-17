@@ -11,10 +11,51 @@ from indexer.scanner import (
 from indexer.single_file import load_and_index_file
 
 
+DOC_REPLACEMENT_MIN = 50
+DOC_REPLACEMENT_RATIO = 0.05
+
+
+def _doc_content_is_damaged(
+    content,
+    extension,
+):
+    """
+    Старые .DOC раньше могли быть сохранены в SQLite с массовыми U+FFFD
+    из-за неверного декодирования LibreOffice TXT как UTF-8.
+
+    Считаем повреждёнными только явно испорченные .DOC, чтобы не
+    переизвлекать документы из-за единичных допустимых replacement chars.
+    """
+    if (
+        (extension or "").lower()
+        != ".doc"
+    ):
+        return False
+
+    text = content or ""
+
+    if not text:
+        return False
+
+    replacement_count = text.count(
+        "\ufffd"
+    )
+
+    if replacement_count < DOC_REPLACEMENT_MIN:
+        return False
+
+    return (
+        replacement_count
+        / max(1, len(text))
+        >= DOC_REPLACEMENT_RATIO
+    )
+
+
 def _needs_extraction(
     content,
     status,
     extractable,
+    extension="",
 ):
     if not extractable:
         return False
@@ -32,6 +73,12 @@ def _needs_extraction(
             content.strip()
         ) >= 10
     ):
+        if _doc_content_is_damaged(
+            content,
+            extension,
+        ):
+            return True
+
         return False
 
     if status == "error":
@@ -278,6 +325,10 @@ def index_folder(
                             content,
                             status,
                             extractable,
+                            file.get(
+                                "extension",
+                                "",
+                            ),
                         )
                     )
 
@@ -325,6 +376,10 @@ def index_folder(
                             content,
                             status,
                             extractable,
+                            file.get(
+                                "extension",
+                                "",
+                            ),
                         )
                     )
 

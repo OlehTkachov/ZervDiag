@@ -391,9 +391,18 @@ def install_runtime_event_logging(main_window):
     original_indexing_error = main_window.indexing_error
 
     def start_indexing_logged(self):
+        try:
+            from database.libraries import get_active_library
+            library = get_active_library()
+            library_name = library.get("name", "—")
+            folder = library.get("source_folder", "")
+        except Exception:
+            library_name = "—"
+            folder = self.settings.value("documentation_folder", "")
         logger.info(
-            "INDEX REQUEST | folder=%s",
-            self.settings.value("documentation_folder", ""),
+            "INDEX REQUEST | library=%s | folder=%s",
+            library_name,
+            folder,
         )
         previous_worker = self.index_worker
         original_start_indexing()

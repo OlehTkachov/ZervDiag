@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from database.libraries import get_active_library
 from database.status import (
     get_database_summary,
     get_status_files,
@@ -24,9 +25,9 @@ STATUS_NAMES = {
     "ocr_pending": "OCR ожидает",
     "ocr_processing": "OCR выполняется",
     "error": "Ошибка",
-    "pending": "Ожидает",
+    "pending": "Ожидает обработки",
     "processing": "Обрабатывается",
-    "unsupported": "Неподдерживаемый",
+    "unsupported": "Не поддерживается",
 }
 
 
@@ -34,10 +35,18 @@ class DatabaseStatusDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("ZervDiag — статистика базы")
         self.resize(1450, 760)
 
         layout = QVBoxLayout(self)
+
+        library = get_active_library()
+        self.setWindowTitle(f"ZervDiag — Статистика: {library['name']}")
+        self.library_label = QLabel(
+            f"Библиотека: {library['name']}\n"
+            f"Папка: {library.get('source_folder') or 'не выбрана'}"
+        )
+        self.library_label.setWordWrap(True)
+        layout.addWidget(self.library_label)
 
         self.summary = QLabel("Загрузка статистики...")
         self.summary.setStyleSheet(
@@ -54,8 +63,8 @@ class DatabaseStatusDialog(QDialog):
         self.filter_box.addItem("OK", "ok")
         self.filter_box.addItem("OCR очередь", "ocr")
         self.filter_box.addItem("Ошибки", "error")
-        self.filter_box.addItem("Pending", "pending")
-        self.filter_box.addItem("Unsupported", "unsupported")
+        self.filter_box.addItem("Ожидают обработки", "pending")
+        self.filter_box.addItem("Не поддерживаются", "unsupported")
         controls.addWidget(self.filter_box)
 
         self.btn_refresh = QPushButton("Обновить")
@@ -116,8 +125,8 @@ class DatabaseStatusDialog(QDialog):
                 f"OK: {stats['ok']:,}   |   "
                 f"OCR: {stats['ocr']:,}   |   "
                 f"Ошибки: {stats['error']:,}   |   "
-                f"Pending: {stats['pending']:,}   |   "
-                f"Unsupported: {stats['unsupported']:,}"
+                f"Ожидают обработки: {stats['pending']:,}   |   "
+                f"Не поддерживаются: {stats['unsupported']:,}"
             )
         except Exception as error:
             self.summary.setText(

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QSettings
 
+from app_paths import SCHEDULED_LOG_PATH
+from database.libraries import ensure_library_registry, get_active_library
 from database.db import create_database
 from indexer.indexer import index_folder
 from runtime_locks import (
@@ -22,8 +24,7 @@ from ui.auto_indexing import (
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
-LOG_PATH = BASE_DIR / "data" / "scheduled_index.log"
+LOG_PATH = SCHEDULED_LOG_PATH
 
 
 def _log(message):
@@ -55,6 +56,9 @@ def _record_success(settings, config):
 def main():
     app = QCoreApplication(sys.argv)
     settings = QSettings("ZervDiag", "ZervDiag")
+    ensure_library_registry(
+        legacy_folder=str(settings.value("documentation_folder", "") or "")
+    )
     config = _read_config(settings)
 
     if not _as_bool(settings.value(KEY_ENABLED, False), False):
@@ -65,9 +69,12 @@ def main():
         _log("SKIP: Windows background scheduling is disabled")
         return 0
 
-    folder = str(settings.value("documentation_folder", "") or "")
+    library = get_active_library()
+    folder = str(library.get("source_folder") or "")
     if not folder:
-        _log("ERROR: documentation folder is not configured")
+        _log(
+            f"ERROR: active library has no documentation folder: {library.get('name', '')}"
+        )
         return 2
 
     if not Path(folder).exists():
@@ -88,7 +95,7 @@ def main():
         return 0
 
     try:
-        _log(f"START: {folder}")
+        _log(f"START: library={library['name']} | folder={folder}")
         create_database()
         added, updated, skipped, deleted, total = index_folder(folder)
         _record_success(settings, config)
