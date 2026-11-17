@@ -3,12 +3,13 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from app_paths import DB_PATH, ensure_runtime_dirs
+from app_paths import ensure_runtime_dirs
+from database.libraries import get_active_database_path
 
 
-PENDING_IMPORT_PATH = DB_PATH.with_name(
-    "zervdiag.pending-import.db"
-)
+def _pending_import_path(database_path=None):
+    path = Path(database_path or get_active_database_path()).resolve()
+    return path.with_name(path.stem + ".pending-import.db")
 
 
 def quick_check(path):
@@ -175,47 +176,42 @@ def _backup_copy(source_path, destination_path):
 
 
 def export_database(destination_path):
-    """Create a consistent user-selected backup of the live database."""
+    """Create a consistent user-selected backup of the active library database."""
     ensure_runtime_dirs()
+    database_path = get_active_database_path()
 
-    if not DB_PATH.exists():
+    if not database_path.exists():
         raise RuntimeError(
-            "Рабочая база ZervDiag не найдена."
+            "Рабочая база активной библиотеки ZervDiag не найдена."
         )
 
     return _backup_copy(
-        DB_PATH,
+        database_path,
         destination_path,
     )
 
 
-def _backup_current_before_import():
-    if not DB_PATH.exists():
+def _backup_current_before_import(database_path):
+    database_path = Path(database_path).resolve()
+    if not database_path.exists():
         return None
 
-    ok, _message = quick_check(
-        DB_PATH
-    )
+    ok, _message = quick_check(database_path)
     if not ok:
         return None
 
-    stamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = database_path.with_name(
+        f"{database_path.stem}_pre_import_{stamp}.db"
     )
-    backup_path = DB_PATH.with_name(
-        f"zervdiag_pre_import_{stamp}.db"
-    )
-
-    return export_database(
-        backup_path
-    )
+    return _backup_copy(database_path, backup_path)
 
 
-def _replace_working_database(prepared_path):
-    prepared = Path(
-        prepared_path
+def _replace_working_database(prepared_path, database_path=None):
+    prepared = Path(prepared_path).resolve()
+    destination = Path(
+        database_path or get_active_database_path()
     ).resolve()
-    destination = DB_PATH.resolve()
 
     ok, message = quick_check(
         prepared
@@ -228,9 +224,7 @@ def _replace_working_database(prepared_path):
 
     ensure_runtime_dirs()
 
-    backup_path = (
-        _backup_current_before_import()
-    )
+    backup_path = _backup_current_before_import(destination)
 
     # Import is applied only before MainWindow opens the database. Remove
     # sidecars belonging to the previous database so an old WAL can never be
@@ -257,17 +251,17 @@ def _replace_working_database(prepared_path):
 
 
 def import_database(source_path):
-    """Immediately import before the application opens its working DB."""
+    """Immediately import into the active library before it is opened."""
     source = Path(source_path).resolve()
-    destination = DB_PATH.resolve()
+    destination = get_active_database_path().resolve()
 
     if source == destination:
         return None
 
     ensure_runtime_dirs()
 
-    prepared = DB_PATH.with_name(
-        "zervdiag.importing.db"
+    prepared = destination.with_name(
+        destination.stem + ".importing.db"
     )
     _remove_database_family(
         prepared
@@ -279,41 +273,42 @@ def import_database(source_path):
     )
 
     return _replace_working_database(
-        prepared
+        prepared,
+        destination,
     )
 
 
 def stage_import_database(source_path):
-    """Validate and stage an import while the GUI is still running."""
+    """Validate and stage an import for the currently active library."""
     source = Path(source_path).resolve()
+    destination = get_active_database_path().resolve()
 
-    if source == DB_PATH.resolve():
+    if source == destination:
         raise RuntimeError(
             "Выбрана текущая рабочая база ZervDiag."
         )
 
     ensure_runtime_dirs()
-    _remove_database_family(
-        PENDING_IMPORT_PATH
-    )
+    pending_path = _pending_import_path(destination)
+    _remove_database_family(pending_path)
 
-    return _backup_copy(
-        source,
-        PENDING_IMPORT_PATH,
-    )
+    return _backup_copy(source, pending_path)
 
 
 def has_staged_import():
-    return PENDING_IMPORT_PATH.exists()
+    return _pending_import_path().exists()
 
 
 def apply_staged_import():
-    """Apply a staged import before MainWindow opens any database connection."""
-    if not has_staged_import():
+    """Apply the staged import for the active library before its DB is opened."""
+    database_path = get_active_database_path().resolve()
+    pending_path = _pending_import_path(database_path)
+    if not pending_path.exists():
         return False, None
 
     backup_path = _replace_working_database(
-        PENDING_IMPORT_PATH
+        pending_path,
+        database_path,
     )
 
     return True, backup_path

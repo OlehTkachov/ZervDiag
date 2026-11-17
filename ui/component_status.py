@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
-from app_paths import DB_PATH, is_frozen
+from app_paths import is_frozen
+from database.libraries import get_active_database_path
 from readers.document_reader import find_libreoffice
 from readers.ocr_reader import TESSERACT
 
@@ -24,11 +25,12 @@ class ComponentState:
 
 
 def _check_database():
-    if not DB_PATH.exists():
+    database_path = get_active_database_path()
+    if not database_path.exists():
         return ComponentState("База данных", False, "не найдена")
 
     try:
-        uri = DB_PATH.resolve().as_uri() + "?mode=ro"
+        uri = database_path.resolve().as_uri() + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=10)
         try:
             result = conn.execute("PRAGMA quick_check").fetchone()

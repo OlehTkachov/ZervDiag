@@ -43,6 +43,8 @@ else:
 DATA_DIR = APP_DATA_DIR
 LOG_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "zervdiag.db"
+LIBRARIES_DIR = DATA_DIR / "libraries"
+LIBRARY_REGISTRY_PATH = DATA_DIR / "libraries.json"
 SCHEDULED_LOG_PATH = DATA_DIR / "scheduled_index.log"
 WRITER_LOCK_PATH = DATA_DIR / ".zervdiag_writer.lock"
 GUI_LOCK_PATH = DATA_DIR / ".zervdiag_gui.lock"
@@ -61,6 +63,8 @@ __all__ = [
     "DATA_DIR",
     "LOG_DIR",
     "DB_PATH",
+    "LIBRARIES_DIR",
+    "LIBRARY_REGISTRY_PATH",
     "SCHEDULED_LOG_PATH",
     "WRITER_LOCK_PATH",
     "GUI_LOCK_PATH",

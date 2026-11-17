@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app_paths import DB_PATH
+from database.libraries import get_active_database_path
 from database.compare import (
     compare_databases,
     load_content_diff,
@@ -101,7 +101,7 @@ class DatabaseCompareDialog(QDialog):
         source_grid = QGridLayout(source_group)
 
         self.left_path_edit = QLineEdit(
-            str(DB_PATH) if DB_PATH.is_file() else ""
+            str(get_active_database_path()) if get_active_database_path().is_file() else ""
         )
         self.left_path_edit.setReadOnly(True)
         self.left_path_edit.setPlaceholderText(

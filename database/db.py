@@ -1,13 +1,21 @@
 import sqlite3
+from pathlib import Path
 
-from app_paths import DATA_DIR, DB_PATH
+from app_paths import DATA_DIR
+from database.libraries import get_active_database_path
 
 
-def get_connection():
+def get_connection(database_path=None):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = (
+        Path(database_path).expanduser().resolve()
+        if database_path is not None
+        else get_active_database_path()
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(
-        DB_PATH,
+        path,
         timeout=30,
     )
 
@@ -22,8 +30,8 @@ def get_connection():
     return conn
 
 
-def create_database():
-    conn = get_connection()
+def create_database(database_path=None):
+    conn = get_connection(database_path)
 
     try:
         conn.execute(

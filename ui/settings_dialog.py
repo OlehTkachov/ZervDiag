@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app_paths import DB_PATH
+from database.libraries import get_active_database_path, get_active_library
 from assistant.provider_config import (
     PROVIDER_OLLAMA,
     PROVIDER_OPENAI,
@@ -227,7 +227,10 @@ class SettingsDialog(QDialog):
         database_path_title = QLabel(_db_t(self.language, "path"))
         database_layout.addWidget(database_path_title)
 
-        database_path = QLabel(str(DB_PATH))
+        active_library = get_active_library()
+        database_path = QLabel(
+            f"{active_library['name']}\\n{get_active_database_path()}"
+        )
         database_path.setWordWrap(True)
         database_path.setTextInteractionFlags(
             database_path.textInteractionFlags()

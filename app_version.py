@@ -1,4 +1,4 @@
-APP_VERSION = "0.15.0-beta.5"
+APP_VERSION = "0.15.0-beta.6"
 APP_DISPLAY_NAME = f"ZervDiag Beta {APP_VERSION}"
 PRODUCT_NAME = "ZervDiag"
 PRODUCT_TAGLINE = "Technical Documentation Intelligence"

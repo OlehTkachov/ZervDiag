@@ -1,5 +1,5 @@
 #define MyAppName "ZervDiag Beta"
-#define MyAppVersion "0.15.0-beta.5"
+#define MyAppVersion "0.15.0-beta.6"
 #define MyAppPublisher "ZervDiag"
 #define MyAppExeName "ZervDiag.exe"
 
@@ -32,11 +32,11 @@ UsePreviousAppDir=yes
 UsePreviousTasks=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-VersionInfoVersion=0.15.0.5
+VersionInfoVersion=0.15.0.6
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=ZervDiag Beta Setup
 VersionInfoProductName=ZervDiag
-VersionInfoProductVersion=0.15.0.5
+VersionInfoProductVersion=0.15.0.6
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
