@@ -229,7 +229,7 @@ class SettingsDialog(QDialog):
 
         active_library = get_active_library()
         database_path = QLabel(
-            f"{active_library['name']}\\n{get_active_database_path()}"
+            f"{active_library['name']}\n{get_active_database_path()}"
         )
         database_path.setWordWrap(True)
         database_path.setTextInteractionFlags(

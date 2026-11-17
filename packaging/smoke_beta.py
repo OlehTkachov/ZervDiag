@@ -217,7 +217,7 @@ def _run_multiple_library_smoke(root):
                     ".txt",
                     10,
                     1.0,
-                    "Legacy database content\\n",
+                    "Legacy database content\n",
                     "ok",
                 )
             ],
@@ -257,7 +257,7 @@ def _run_multiple_library_smoke(root):
                     ".txt",
                     12,
                     2.0,
-                    "Document belonging only to library A\\n",
+                    "Document belonging only to library A\n",
                     "ok",
                 ),
             )
@@ -282,7 +282,7 @@ def _run_multiple_library_smoke(root):
                     ".txt",
                     13,
                     3.0,
-                    "Document belonging only to library B\\n",
+                    "Document belonging only to library B\n",
                     "ok",
                 ),
             )

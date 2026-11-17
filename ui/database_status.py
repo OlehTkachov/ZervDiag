@@ -43,7 +43,7 @@ class DatabaseStatusDialog(QDialog):
         library = get_active_library()
         self.setWindowTitle(f"ZervDiag — Статистика: {library['name']}")
         self.library_label = QLabel(
-            f"Библиотека: {library['name']}\\n"
+            f"Библиотека: {library['name']}\n"
             f"Папка: {library.get('source_folder') or 'не выбрана'}"
         )
         self.library_label.setWordWrap(True)

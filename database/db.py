@@ -64,6 +64,17 @@ def create_database(database_path=None):
             """
         )
 
+        # A newly created library has already passed the explicit first-run
+        # database choice. Keep that acknowledgement inside this library DB
+        # so switching to it does not show the legacy migration prompt again.
+        conn.execute(
+            """
+            INSERT INTO app_meta (key, value)
+            VALUES ('beta_database_choice_v2', '1')
+            ON CONFLICT(key) DO UPDATE SET value = '1'
+            """
+        )
+
         columns = {
             row[1]
             for row in conn.execute(

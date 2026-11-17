@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         )
 
         self.btn_folder = QPushButton(
-            "Выбрать папку"
+            "Папка библиотеки"
         )
 
         self.btn_duplicates = QPushButton(
