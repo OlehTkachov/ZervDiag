@@ -330,6 +330,10 @@ class MainWindow(QMainWindow):
             "Клоны"
         )
 
+        self.btn_compare_databases = QPushButton(
+            "Сравнить базы"
+        )
+
         self.btn_settings = QPushButton(
             "Настройки"
         )
@@ -351,6 +355,9 @@ class MainWindow(QMainWindow):
         )
         left_panel.addWidget(
             self.btn_duplicates
+        )
+        left_panel.addWidget(
+            self.btn_compare_databases
         )
         left_panel.addWidget(
             self.btn_settings
@@ -503,6 +510,10 @@ class MainWindow(QMainWindow):
 
         self.btn_duplicates.clicked.connect(
             self.start_duplicate_search
+        )
+
+        self.btn_compare_databases.clicked.connect(
+            self.open_database_comparison
         )
 
         self.search_input.returnPressed.connect(
@@ -1258,6 +1269,24 @@ class MainWindow(QMainWindow):
         if self.duplicate_worker:
             self.duplicate_worker.deleteLater()
             self.duplicate_worker = None
+
+    def open_database_comparison(self):
+        if (
+            self.index_worker
+            and self.index_worker.isRunning()
+        ) or (
+            self.ocr_worker
+            and self.ocr_worker.isRunning()
+        ):
+            self.status.setText(
+                "Остановите индексацию и OCR перед сравнением баз."
+            )
+            return
+
+        from ui.database_compare_dialog import DatabaseCompareDialog
+
+        dialog = DatabaseCompareDialog(self)
+        dialog.exec()
 
     def open_file(
         self,

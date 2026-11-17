@@ -386,6 +386,7 @@ def install_branding(main_window):
         getattr(main_window, "btn_ocr", None),
         getattr(main_window, "btn_folder", None),
         getattr(main_window, "btn_duplicates", None),
+        getattr(main_window, "btn_compare_databases", None),
         getattr(main_window, "btn_settings", None),
         getattr(main_window, "btn_db_status", None),
         getattr(main_window, "btn_ai_assistant", None),
