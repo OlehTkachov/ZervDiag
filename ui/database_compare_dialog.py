@@ -149,6 +149,7 @@ class DatabaseCompareDialog(QDialog):
         filter_layout.addWidget(QLabel("Показать:"))
 
         self.filter_box = QComboBox()
+        self.filter_box.addItem("Только различия", "differences")
         self.filter_box.addItem("Все результаты", "all")
         self.filter_box.addItem("Изменённый текст", "content_changed")
         self.filter_box.addItem("Исходный файл отличается, текст совпадает", "source_changed_text_same")
@@ -335,6 +336,12 @@ class DatabaseCompareDialog(QDialog):
 
         if filter_kind == "all":
             visible = list(enumerate(items))
+        elif filter_kind == "differences":
+            visible = [
+                (index, item)
+                for index, item in enumerate(items)
+                if item["kind"] != "identical"
+            ]
         else:
             visible = [
                 (index, item)
@@ -355,13 +362,18 @@ class DatabaseCompareDialog(QDialog):
             left = item.get("left")
             right = item.get("right")
 
+            method = item.get("match_method")
+            method_label = METHOD_LABELS.get(
+                method,
+                method or "—",
+            )
+            if item.get("match_confidence") == "low":
+                method_label += " — низкая уверенность"
+
             values = [
                 KIND_LABELS.get(item["kind"], item["kind"]),
                 item.get("filename") or "",
-                METHOD_LABELS.get(
-                    item.get("match_method"),
-                    item.get("match_method") or "—",
-                ),
+                method_label,
                 STATUS_LABELS.get(
                     left.get("status"),
                     left.get("status", "—"),
