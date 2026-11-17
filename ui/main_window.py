@@ -656,25 +656,7 @@ class MainWindow(QMainWindow):
             f"OCR ожидают: {ocr_count}."
         )
 
-    def add_library(self):
-        if self._database_workers_running():
-            QMessageBox.information(
-                self,
-                "Добавление библиотеки",
-                "Сначала дождитесь завершения текущей операции с базой.",
-            )
-            return
-
-        active = get_active_library()
-        start_folder = active.get("source_folder") or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Выберите папку новой библиотеки",
-            start_folder,
-        )
-        if not folder:
-            return
-
+    def _create_library_for_folder(self, folder):
         suggested_name = Path(folder).name or "Новая библиотека"
         name, accepted = QInputDialog.getText(
             self,
@@ -684,7 +666,7 @@ class MainWindow(QMainWindow):
             suggested_name,
         )
         if not accepted:
-            return
+            return False
 
         library = None
         try:
@@ -702,7 +684,7 @@ class MainWindow(QMainWindow):
                 "Не удалось добавить библиотеку",
                 f"{type(error).__name__}: {error}",
             )
-            return
+            return False
 
         self._active_library_id = library["id"]
         self._refresh_library_selector()
@@ -713,6 +695,26 @@ class MainWindow(QMainWindow):
             f"Создана отдельная библиотека «{library['name']}». "
             "Теперь можно запустить её индексацию."
         )
+        return True
+
+    def add_library(self):
+        if self._database_workers_running():
+            QMessageBox.information(
+                self,
+                "Добавление библиотеки",
+                "Сначала дождитесь завершения текущей операции с базой.",
+            )
+            return
+
+        active = get_active_library()
+        start_folder = active.get("source_folder") or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите папку новой библиотеки",
+            start_folder,
+        )
+        if folder:
+            self._create_library_for_folder(folder)
 
     def update_ocr_button(
         self,
@@ -744,19 +746,39 @@ class MainWindow(QMainWindow):
         if not folder:
             return
 
-        if current_folder and os.path.normcase(os.path.abspath(current_folder)) != os.path.normcase(os.path.abspath(folder)):
-            answer = QMessageBox.question(
-                self,
-                "Изменение папки библиотеки",
-                "В этой библиотеке уже могут храниться записи из прежней папки. "
-                "Смена корневой папки не переносит и не удаляет старые записи.\n\n"
-                "Если это вторая независимая коллекция документов, нажмите «Нет» "
-                "и используйте кнопку «Добавить библиотеку».\n\n"
-                "Всё равно изменить папку текущей библиотеки?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+        same_folder = (
+            current_folder
+            and os.path.normcase(os.path.abspath(current_folder))
+            == os.path.normcase(os.path.abspath(folder))
+        )
+        if current_folder and not same_folder:
+            choice = QMessageBox(self)
+            choice.setWindowTitle("Другая папка документов")
+            choice.setText(
+                "Вы выбрали папку, отличающуюся от корня активной библиотеки.\n\n"
+                "Для независимой коллекции рекомендуется создать отдельную библиотеку: "
+                "у неё будет собственная база и отдельная статистика. "
+                "Замена корня текущей библиотеки не переносит и не удаляет старые записи."
             )
-            if answer != QMessageBox.StandardButton.Yes:
+            create_button = choice.addButton(
+                "Создать новую библиотеку",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            replace_button = choice.addButton(
+                "Заменить папку текущей",
+                QMessageBox.ButtonRole.DestructiveRole,
+            )
+            choice.addButton(
+                QMessageBox.StandardButton.Cancel
+            )
+            choice.setDefaultButton(create_button)
+            choice.exec()
+            selected = choice.clickedButton()
+
+            if selected == create_button:
+                self._create_library_for_folder(folder)
+                return
+            if selected != replace_button:
                 return
 
         try:
