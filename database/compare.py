@@ -197,9 +197,11 @@ def _load_snapshot(database_path):
         records = []
 
         for row in connection.execute(query):
-            content_hash, text_chars = _text_fingerprint(row["content"])
             filename = str(row["filename"] or "")
             extension = str(row["extension"] or Path(filename).suffix).lower()
+            status = str(row["extraction_status"] or "pending")
+            fingerprint, text_chars = _text_fingerprint(row["content"])
+            content_hash = fingerprint if status == "ok" else None
 
             records.append({
                 "id": int(row["id"]),
@@ -212,7 +214,7 @@ def _load_snapshot(database_path):
                 "text_chars": text_chars,
                 "has_text": content_hash is not None,
                 "file_hash": str(row["file_hash"] or "").strip() or None,
-                "status": str(row["extraction_status"] or "pending"),
+                "status": status,
                 "error": str(row["extraction_error"] or ""),
                 "is_cloud": bool(row["is_cloud"]),
             })
@@ -221,6 +223,14 @@ def _load_snapshot(database_path):
         connection.close()
 
     root, module = _infer_root(records)
+    for record in records:
+        relative_key = _relative_path_key(record, root, module)
+        record["relative_key"] = relative_key
+        record["relative_depth"] = (
+            relative_key.count("/") + 1
+            if relative_key
+            else 0
+        )
 
     return {
         "path": str(path),
@@ -409,14 +419,23 @@ def _classify_pair(left, right, method):
             kind = "text_unavailable"
             summary = "Нет достаточного извлечённого текста для сравнения"
 
-    confidence = (
-        "low"
-        if method == "filename"
-        else "high"
-    )
+    confidence = "high"
+    if (
+        method in ("filename", "content_hash")
+        or (
+            method == "relative_path"
+            and (
+                left.get("relative_depth", 0) <= 1
+                or right.get("relative_depth", 0) <= 1
+            )
+        )
+    ):
+        confidence = "low"
 
     if method == "filename":
         summary = "Сопоставлено только по имени. " + summary
+    elif method == "content_hash":
+        summary = "Сопоставлено по совпадению текста; проверьте документ. " + summary
 
     return {
         "kind": kind,
@@ -477,16 +496,8 @@ def compare_databases(left_path, right_path):
             right_records,
             unmatched_left,
             unmatched_right,
-            lambda record: _relative_path_key(
-                record,
-                left_root,
-                left_module,
-            ),
-            lambda record: _relative_path_key(
-                record,
-                right_root,
-                right_module,
-            ),
+            lambda record: record.get("relative_key"),
+            lambda record: record.get("relative_key"),
             "relative_path",
         ))
 
@@ -651,14 +662,22 @@ def _read_content(database_path, file_id):
         if "content" not in columns:
             return ""
 
+        status_expression = (
+            '"extraction_status"'
+            if "extraction_status" in columns
+            else "'ok'"
+        )
         row = connection.execute(
-            "SELECT content FROM files WHERE id = ?",
+            "SELECT content, "
+            + status_expression
+            + " AS extraction_status FROM files WHERE id = ?",
             (int(file_id),),
         ).fetchone()
 
-        return _normalise_text(
-            row["content"] if row else ""
-        )
+        if not row or str(row["extraction_status"] or "") != "ok":
+            return ""
+
+        return _normalise_text(row["content"])
 
     finally:
         connection.close()

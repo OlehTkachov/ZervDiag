@@ -44,7 +44,7 @@ METHOD_LABELS = {
     "absolute_path": "Полный путь",
     "relative_path": "Относительный путь",
     "file_hash": "Хеш файла",
-    "content_hash": "Хеш текста",
+    "content_hash": "Хеш текста (проверить)",
     "filename": "Только имя (проверить)",
 }
 
@@ -131,6 +131,14 @@ class DatabaseCompareDialog(QDialog):
 
         root.addWidget(source_group)
 
+        self.note_label = QLabel(
+            "Сравниваются метаданные и извлечённый текст, сохранённые в SQLite. "
+            "Оригинальные документы не открываются и не изменяются. "
+            "Совпадения по одному имени или хешу текста требуют проверки."
+        )
+        self.note_label.setWordWrap(True)
+        root.addWidget(self.note_label)
+
         self.summary_label = QLabel(
             "Выберите две базы SQLite для сравнения."
         )
@@ -143,6 +151,8 @@ class DatabaseCompareDialog(QDialog):
         self.filter_box = QComboBox()
         self.filter_box.addItem("Все результаты", "all")
         self.filter_box.addItem("Изменённый текст", "content_changed")
+        self.filter_box.addItem("Исходный файл отличается, текст совпадает", "source_changed_text_same")
+        self.filter_box.addItem("Исходный файл отличается", "source_changed")
         self.filter_box.addItem("Только в базе A", "only_left")
         self.filter_box.addItem("Только в базе B", "only_right")
         self.filter_box.addItem("Различия метаданных", "metadata_changed")
@@ -300,10 +310,13 @@ class DatabaseCompareDialog(QDialog):
             f"База A: {summary['left_total']:,} файлов  |  "
             f"База B: {summary['right_total']:,} файлов\n"
             f"Сопоставлено: {summary['matched']:,}  |  "
-            f"Изменён текст: {summary['content_changed']:,}  |  "
+            f"Текст изменён: {summary['content_changed']:,}  |  "
+            f"Метаданные: {summary['metadata_changed']:,}  |  "
+            f"Статусы: {summary['status_changed']:,}\n"
             f"Только A: {summary['only_left']:,}  |  "
             f"Только B: {summary['only_right']:,}  |  "
             f"Совпадают: {summary['identical']:,}  |  "
+            f"Без текста: {summary['text_unavailable']:,}  |  "
             f"Неоднозначно: {summary['ambiguous']:,}"
         )
 
@@ -393,10 +406,10 @@ class DatabaseCompareDialog(QDialog):
 
         method = item.get("match_method")
         if method:
-            lines.append(
-                "Сопоставление: "
-                + METHOD_LABELS.get(method, method)
-            )
+            method_text = METHOD_LABELS.get(method, method)
+            if item.get("match_confidence") == "low":
+                method_text += " — низкая уверенность"
+            lines.append("Сопоставление: " + method_text)
 
         left = item.get("left")
         right = item.get("right")
