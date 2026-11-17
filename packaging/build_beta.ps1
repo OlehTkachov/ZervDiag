@@ -24,7 +24,7 @@ if (-not (Test-Path $brandIcon)) {
     throw "Brand icon was not created: $brandIcon"
 }
 
-Write-Host "`n[smoke] Database transfer and settings UI..."
+Write-Host "`n[smoke] Database transfer, comparison and commercial UI..."
 & $Python ".\packaging\smoke_beta.py"
 if ($LASTEXITCODE -ne 0) {
     throw "Beta database/settings smoke test failed"

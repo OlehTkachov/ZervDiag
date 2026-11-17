@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - v15-beta-installer
+      - feature/database-comparison
     paths:
       - "**/*.py"
       - "requirements*.txt"
@@ -13,6 +14,7 @@ on:
   pull_request:
     branches:
       - master
+      - v15-beta-installer
     paths:
       - "**/*.py"
       - "requirements*.txt"
