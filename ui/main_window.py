@@ -657,6 +657,14 @@ class MainWindow(QMainWindow):
         )
 
     def _create_library_for_folder(self, folder):
+        if self._database_workers_running():
+            QMessageBox.information(
+                self,
+                "Добавление библиотеки",
+                "Сначала дождитесь завершения текущей операции с базой.",
+            )
+            return False
+
         suggested_name = Path(folder).name or "Новая библиотека"
         name, accepted = QInputDialog.getText(
             self,
