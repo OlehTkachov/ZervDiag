@@ -35,7 +35,6 @@ class DatabaseStatusDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("ZervDiag — статистика базы")
         self.resize(1450, 760)
 
         layout = QVBoxLayout(self)
