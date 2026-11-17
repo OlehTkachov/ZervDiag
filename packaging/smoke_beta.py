@@ -194,6 +194,7 @@ def _run_multiple_library_smoke(root):
 
     try:
         test_data = root / "multi_library_data"
+        test_data.mkdir(parents=True, exist_ok=True)
         library_manager.REGISTRY_PATH = test_data / "libraries.json"
         library_manager.LIBRARIES_DIR = test_data / "libraries"
         library_manager.DEFAULT_DB_PATH = test_data / "zervdiag.db"
