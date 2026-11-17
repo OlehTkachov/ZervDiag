@@ -1,9 +1,11 @@
 import sqlite3
 from pathlib import Path
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from app_paths import DB_PATH, ensure_runtime_dirs, is_frozen
+from app_paths import ensure_runtime_dirs, is_frozen
+from database.libraries import ensure_library_registry, get_active_database_path
 from database.db import create_database
 from database.transfer import (
     apply_staged_import,
@@ -16,22 +18,22 @@ DATABASE_SETUP_KEY = "beta_database_choice_v2"
 
 
 def _existing_database_ok():
-    if not DB_PATH.exists():
+    database_path = get_active_database_path()
+    if not database_path.exists():
         return False
 
-    ok, _message = quick_check(
-        DB_PATH
-    )
+    ok, _message = quick_check(database_path)
     return ok
 
 
 def _database_choice_acknowledged():
-    if not DB_PATH.exists():
+    database_path = get_active_database_path()
+    if not database_path.exists():
         return False
 
     try:
         conn = sqlite3.connect(
-            DB_PATH,
+            database_path,
             timeout=30,
         )
 
@@ -69,7 +71,7 @@ def _mark_database_choice_acknowledged():
     create_database()
 
     conn = sqlite3.connect(
-        DB_PATH,
+        get_active_database_path(),
         timeout=30,
     )
 
@@ -129,7 +131,7 @@ def _import_selected_database(parent, filename):
             parent,
             "ZervDiag Beta",
             "База успешно импортирована и проверена.\n\n"
-            f"Рабочая копия:\n{DB_PATH}"
+            f"Рабочая копия:\n{get_active_database_path()}"
             + _backup_note(backup_path),
         )
         return True
@@ -160,7 +162,7 @@ def _confirm_existing_database(parent):
         box.setInformativeText(
             "Она могла остаться от предыдущей установки Beta. "
             "Выберите явно, какую базу использовать.\n\n"
-            f"Текущая база:\n{DB_PATH}"
+            f"Текущая база:\n{get_active_database_path()}"
         )
 
         use_button = box.addButton(
@@ -206,6 +208,11 @@ def ensure_database_ready(parent=None):
     """Prepare the writable database before MainWindow creates/migrates it."""
     # Source mode keeps the established developer workflow. A missing source
     # DB is simply created as before; the migration UI is for installed Beta.
+    legacy_settings = QSettings("ZervDiag", "ZervDiag")
+    ensure_library_registry(
+        legacy_folder=str(legacy_settings.value("documentation_folder", "") or "")
+    )
+
     if not is_frozen():
         create_database()
         return True
@@ -235,7 +242,7 @@ def ensure_database_ready(parent=None):
             parent,
             "ZervDiag Beta — импорт базы",
             "Подготовленная база успешно применена и проверена.\n\n"
-            f"Рабочая база:\n{DB_PATH}"
+            f"Рабочая база:\n{get_active_database_path()}"
             + _backup_note(backup_path),
         )
         return True
@@ -248,12 +255,12 @@ def ensure_database_ready(parent=None):
             parent
         )
 
-    if DB_PATH.exists():
+    if get_active_database_path().exists():
         QMessageBox.warning(
             parent,
             "ZervDiag Beta — база данных",
             "Локальная база найдена, но не прошла проверку SQLite.\n\n"
-            f"Путь: {DB_PATH}\n\n"
+            f"Путь: {get_active_database_path()}\n\n"
             "ZervDiag не будет перезаписывать её автоматически. "
             "Выберите проверенную резервную копию.",
         )
@@ -272,7 +279,7 @@ def ensure_database_ready(parent=None):
         box.setInformativeText(
             "Можно импортировать уже проиндексированную zervdiag.db "
             "или создать новую пустую базу.\n\n"
-            f"Рабочая база будет храниться здесь:\n{DB_PATH}"
+            f"Рабочая база будет храниться здесь:\n{get_active_database_path()}"
         )
 
         import_button = box.addButton(

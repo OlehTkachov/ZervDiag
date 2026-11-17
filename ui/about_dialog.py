@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app_paths import DB_PATH, resource_path
+from app_paths import resource_path
+from database.libraries import get_active_database_path
 from app_version import (
     APP_VERSION,
     COPYRIGHT,
@@ -137,7 +138,7 @@ class AboutDialog(QDialog):
         details = QLabel(
             f"<b>{text['version']}:</b> {APP_VERSION}<br>"
             f"<b>{text['channel']}:</b> {PRODUCT_EDITION}<br>"
-            f"<b>{text['database']}:</b><br>{DB_PATH}"
+            f"<b>{text['database']}:</b><br>{get_active_database_path()}"
         )
         details.setWordWrap(True)
         details.setTextInteractionFlags(Qt.TextSelectableByMouse)

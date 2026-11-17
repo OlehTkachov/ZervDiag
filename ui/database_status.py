@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from database.libraries import get_active_library
 from database.status import (
     get_database_summary,
     get_status_files,
@@ -34,10 +35,18 @@ class DatabaseStatusDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.setWindowTitle("ZervDiag — статистика базы")
         self.resize(1450, 760)
 
         layout = QVBoxLayout(self)
+
+        library = get_active_library()
+        self.setWindowTitle(f"ZervDiag — Статистика: {library['name']}")
+        self.library_label = QLabel(
+            f"Библиотека: {library['name']}\n"
+            f"Папка: {library.get('source_folder') or 'не выбрана'}"
+        )
+        self.library_label.setWordWrap(True)
+        layout.addWidget(self.library_label)
 
         self.summary = QLabel("Загрузка статистики...")
         self.summary.setStyleSheet(

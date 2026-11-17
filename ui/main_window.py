@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from PySide6.QtCore import (
     QSettings,
@@ -6,12 +7,15 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHeaderView,
+    QInputDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -23,6 +27,16 @@ from database.db import (
     create_database,
     get_ocr_pending_count,
     get_status_counts,
+)
+from database.libraries import (
+    add_library as register_library,
+    ensure_library_registry,
+    get_active_library,
+    get_active_library_id,
+    get_libraries,
+    remove_library,
+    set_active_library,
+    update_library_folder,
 )
 from indexer.indexer import (
     index_folder,
@@ -279,6 +293,12 @@ class MainWindow(QMainWindow):
             "ZervDiag",
         )
 
+        ensure_library_registry(
+            legacy_folder=str(
+                self.settings.value("documentation_folder", "") or ""
+            )
+        )
+        self._active_library_id = get_active_library_id()
         create_database()
 
         self.create_ui()
@@ -323,7 +343,7 @@ class MainWindow(QMainWindow):
         )
 
         self.btn_folder = QPushButton(
-            "Выбрать папку"
+            "Папка библиотеки"
         )
 
         self.btn_duplicates = QPushButton(
@@ -331,8 +351,10 @@ class MainWindow(QMainWindow):
         )
 
         self.btn_compare_databases = QPushButton(
-            "Сравнить базы"
+            "Сравнить библиотеки"
         )
+        # Keep the established attribute name for the branding layer.
+        self.btn_compare_libraries = self.btn_compare_databases
 
         self.btn_settings = QPushButton(
             "Настройки"
@@ -366,9 +388,22 @@ class MainWindow(QMainWindow):
 
         right_panel = QVBoxLayout()
 
+        library_layout = QHBoxLayout()
+        self.library_title_label = QLabel("Библиотека:")
+        library_layout.addWidget(self.library_title_label)
+        self.library_combo = QComboBox()
+        self.library_combo.setMinimumWidth(240)
+        library_layout.addWidget(self.library_combo, 1)
+        self.btn_add_library = QPushButton("Добавить библиотеку")
+        self.btn_add_library.setToolTip(
+            "Создать отдельную библиотеку для другой папки документов"
+        )
+        library_layout.addWidget(self.btn_add_library)
+        right_panel.addLayout(library_layout)
+
         right_panel.addWidget(
             QLabel(
-                "Папка документации:"
+                "Папка активной библиотеки:"
             )
         )
 
@@ -492,6 +527,13 @@ class MainWindow(QMainWindow):
             self.select_folder
         )
 
+        self.library_combo.currentIndexChanged.connect(
+            self.change_library
+        )
+        self.btn_add_library.clicked.connect(
+            self.add_library
+        )
+
         self.btn_index.clicked.connect(
             self.toggle_indexing
         )
@@ -527,25 +569,160 @@ class MainWindow(QMainWindow):
     def load_settings(
         self,
     ):
-        folder = self.settings.value(
-            "documentation_folder",
-            "",
+        self._refresh_library_selector()
+
+    def _database_workers_running(self):
+        return any(
+            worker is not None and worker.isRunning()
+            for worker in (
+                self.index_worker,
+                self.ocr_worker,
+                self.search_worker,
+                self.duplicate_worker,
+            )
         )
 
-        if (
-            folder
-            and os.path.exists(
-                folder
+    def _refresh_library_selector(self):
+        libraries = get_libraries()
+        active_id = get_active_library_id()
+        self.library_combo.blockSignals(True)
+        self.library_combo.clear()
+        for library in libraries:
+            self.library_combo.addItem(
+                library["name"],
+                library["id"],
             )
-        ):
-            self.folder_label.setText(
-                folder
-            )
+        selected = self.library_combo.findData(active_id)
+        if selected >= 0:
+            self.library_combo.setCurrentIndex(selected)
+        self.library_combo.blockSignals(False)
+        self._active_library_id = active_id
+        self._update_library_folder_label()
 
-        else:
-            self.folder_label.setText(
-                "Папка не выбрана"
+    def _update_library_folder_label(self):
+        library = get_active_library()
+        folder = library.get("source_folder") or ""
+        self.folder_label.setText(
+            folder or "Папка не выбрана — выберите её или добавьте библиотеку"
+        )
+        self.folder_label.setToolTip(
+            f"База библиотеки: {library['database_path']}"
+        )
+        self.library_combo.setToolTip(
+            f"Активная библиотека: {library['name']}"
+        )
+
+    def change_library(self, _index=None):
+        library_id = self.library_combo.currentData()
+        if not library_id or library_id == self._active_library_id:
+            return
+
+        if self._database_workers_running():
+            self.library_combo.blockSignals(True)
+            selected = self.library_combo.findData(self._active_library_id)
+            if selected >= 0:
+                self.library_combo.setCurrentIndex(selected)
+            self.library_combo.blockSignals(False)
+            QMessageBox.information(
+                self,
+                "Смена библиотеки",
+                "Сначала дождитесь завершения поиска, индексации, OCR или поиска клонов.",
             )
+            return
+
+        previous_id = self._active_library_id
+        try:
+            set_active_library(library_id)
+            create_database()
+        except Exception as error:
+            if previous_id:
+                set_active_library(previous_id)
+            self._refresh_library_selector()
+            QMessageBox.critical(
+                self,
+                "Не удалось открыть библиотеку",
+                f"{type(error).__name__}: {error}",
+            )
+            return
+
+        self._active_library_id = library_id
+        self.results.setRowCount(0)
+        self.current_results = []
+        self._update_library_folder_label()
+        ocr_count = self.update_ocr_button()
+        library = get_active_library()
+        self.status.setText(
+            f"Активна библиотека «{library['name']}». "
+            f"OCR ожидают: {ocr_count}."
+        )
+
+    def _create_library_for_folder(self, folder):
+        if self._database_workers_running():
+            QMessageBox.information(
+                self,
+                "Добавление библиотеки",
+                "Сначала дождитесь завершения текущей операции с базой.",
+            )
+            return False
+
+        suggested_name = Path(folder).name or "Новая библиотека"
+        name, accepted = QInputDialog.getText(
+            self,
+            "Новая библиотека",
+            "Название библиотеки:",
+            QLineEdit.EchoMode.Normal,
+            suggested_name,
+        )
+        if not accepted:
+            return False
+
+        library = None
+        try:
+            library = register_library(name, folder)
+            create_database(database_path=library["database_path"])
+            set_active_library(library["id"])
+        except Exception as error:
+            if library is not None:
+                try:
+                    remove_library(library["id"], delete_database=True)
+                except Exception:
+                    pass
+            QMessageBox.critical(
+                self,
+                "Не удалось добавить библиотеку",
+                f"{type(error).__name__}: {error}",
+            )
+            return False
+
+        self._active_library_id = library["id"]
+        self._refresh_library_selector()
+        self.results.setRowCount(0)
+        self.current_results = []
+        self.update_ocr_button()
+        self.status.setText(
+            f"Создана отдельная библиотека «{library['name']}». "
+            "Теперь можно запустить её индексацию."
+        )
+        return True
+
+    def add_library(self):
+        if self._database_workers_running():
+            QMessageBox.information(
+                self,
+                "Добавление библиотеки",
+                "Сначала дождитесь завершения текущей операции с базой.",
+            )
+            return
+
+        active = get_active_library()
+        start_folder = active.get("source_folder") or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Выберите папку новой библиотеки",
+            start_folder,
+        )
+        if folder:
+            self._create_library_for_folder(folder)
 
     def update_ocr_button(
         self,
@@ -567,39 +744,64 @@ class MainWindow(QMainWindow):
     def select_folder(
         self,
     ):
-        current_folder = self.settings.value(
-            "documentation_folder",
-            "",
-        )
-
-        if not (
-            current_folder
-            and os.path.exists(
-                current_folder
-            )
-        ):
-            current_folder = ""
-
+        library = get_active_library()
+        current_folder = library.get("source_folder") or ""
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Выберите папку с документацией",
-            current_folder,
+            "Выберите папку активной библиотеки",
+            current_folder if os.path.isdir(current_folder) else str(Path.home()),
         )
-
         if not folder:
             return
 
-        self.settings.setValue(
-            "documentation_folder",
-            folder,
+        same_folder = (
+            current_folder
+            and os.path.normcase(os.path.abspath(current_folder))
+            == os.path.normcase(os.path.abspath(folder))
         )
+        if current_folder and not same_folder:
+            choice = QMessageBox(self)
+            choice.setWindowTitle("Другая папка документов")
+            choice.setText(
+                "Вы выбрали папку, отличающуюся от корня активной библиотеки.\n\n"
+                "Для независимой коллекции рекомендуется создать отдельную библиотеку: "
+                "у неё будет собственная база и отдельная статистика. "
+                "Замена корня текущей библиотеки не переносит и не удаляет старые записи."
+            )
+            create_button = choice.addButton(
+                "Создать новую библиотеку",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            replace_button = choice.addButton(
+                "Заменить папку текущей",
+                QMessageBox.ButtonRole.DestructiveRole,
+            )
+            choice.addButton(
+                QMessageBox.StandardButton.Cancel
+            )
+            choice.setDefaultButton(create_button)
+            choice.exec()
+            selected = choice.clickedButton()
 
-        self.folder_label.setText(
-            folder
-        )
+            if selected == create_button:
+                self._create_library_for_folder(folder)
+                return
+            if selected != replace_button:
+                return
 
+        try:
+            update_library_folder(self._active_library_id, folder)
+        except Exception as error:
+            QMessageBox.warning(
+                self,
+                "Папка не сохранена",
+                f"{type(error).__name__}: {error}",
+            )
+            return
+
+        self._update_library_folder_label()
         self.status.setText(
-            "Папка сохранена"
+            "Папка активной библиотеки сохранена."
         )
 
     # ---------------------------
@@ -631,14 +833,12 @@ class MainWindow(QMainWindow):
     def start_indexing(
         self,
     ):
-        folder = self.settings.value(
-            "documentation_folder",
-            "",
-        )
+        library = get_active_library()
+        folder = library.get("source_folder") or ""
 
         if not folder:
             self.status.setText(
-                "Сначала выберите папку"
+                "У активной библиотеки не выбрана папка. Выберите папку или добавьте библиотеку."
             )
             return
 
@@ -674,9 +874,11 @@ class MainWindow(QMainWindow):
         self.btn_duplicates.setEnabled(
             False
         )
+        self.library_combo.setEnabled(False)
+        self.btn_add_library.setEnabled(False)
 
         self.status.setText(
-            "Быстрая индексация: 0%"
+            f"Индексация библиотеки «{library['name']}»: 0%"
         )
 
         self.index_worker = IndexWorker(
@@ -802,6 +1004,8 @@ class MainWindow(QMainWindow):
         self.btn_duplicates.setEnabled(
             True
         )
+        self.library_combo.setEnabled(True)
+        self.btn_add_library.setEnabled(True)
 
     # ---------------------------
     # OCR очередь
@@ -866,6 +1070,8 @@ class MainWindow(QMainWindow):
         self.btn_duplicates.setEnabled(
             False
         )
+        self.library_combo.setEnabled(False)
+        self.btn_add_library.setEnabled(False)
 
         self.status.setText(
             f"OCR очередь: "
@@ -981,6 +1187,8 @@ class MainWindow(QMainWindow):
         self.btn_duplicates.setEnabled(
             True
         )
+        self.library_combo.setEnabled(True)
+        self.btn_add_library.setEnabled(True)
 
     # ---------------------------
     # Поиск
@@ -1283,9 +1491,9 @@ class MainWindow(QMainWindow):
             )
             return
 
-        from ui.database_compare_dialog import DatabaseCompareDialog
+        from ui.library_compare_dialog import LibraryCompareDialog
 
-        dialog = DatabaseCompareDialog(self)
+        dialog = LibraryCompareDialog(self)
         dialog.exec()
 
     def open_file(

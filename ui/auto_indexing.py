@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from types import MethodType
 
 from PySide6.QtCore import QTime, QTimer
+from database.libraries import get_active_library
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -328,7 +329,10 @@ class AutoIndexController:
         if ocr_worker and ocr_worker.isRunning():
             return
 
-        folder = self.settings.value("documentation_folder", "")
+        try:
+            folder = get_active_library().get("source_folder", "")
+        except Exception:
+            return
         if not folder or not os.path.exists(folder):
             return
 
