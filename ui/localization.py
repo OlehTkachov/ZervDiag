@@ -49,7 +49,13 @@ def apply_main_window_language(main_window):
     else:
         main_window.update_ocr_button()
 
-    main_window.btn_folder.setText(tr("nav.choose_folder", language))
+    main_window.btn_folder.setText(tr("nav.choose_library_folder", language))
+    if hasattr(main_window, "btn_add_library"):
+        main_window.btn_add_library.setText(tr("nav.add_library", language))
+    if hasattr(main_window, "btn_compare_databases"):
+        main_window.btn_compare_databases.setText(tr("nav.compare_libraries", language))
+    if hasattr(main_window, "library_title_label"):
+        main_window.library_title_label.setText(tr("search.library", language))
     main_window.btn_duplicates.setText(tr("nav.duplicates", language))
     main_window.btn_settings.setText(tr("nav.settings", language))
 
@@ -60,7 +66,11 @@ def apply_main_window_language(main_window):
     if folder_title is not None:
         folder_title.setText(tr("search.folder", language))
 
-    folder = main_window.settings.value("documentation_folder", "")
+    try:
+        from database.libraries import get_active_library
+        folder = get_active_library().get("source_folder", "")
+    except Exception:
+        folder = ""
     if not folder:
         main_window.folder_label.setText(tr("search.no_folder", language))
 

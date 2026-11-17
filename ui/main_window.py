@@ -389,7 +389,8 @@ class MainWindow(QMainWindow):
         right_panel = QVBoxLayout()
 
         library_layout = QHBoxLayout()
-        library_layout.addWidget(QLabel("Библиотека:"))
+        self.library_title_label = QLabel("Библиотека:")
+        library_layout.addWidget(self.library_title_label)
         self.library_combo = QComboBox()
         self.library_combo.setMinimumWidth(240)
         library_layout.addWidget(self.library_combo, 1)
