@@ -20,7 +20,8 @@ def _folder_title_label(main_window):
     if right_layout is None:
         return None
 
-    item = right_layout.itemAt(0)
+    # The library selector occupies the first row; the folder title is next.
+    item = right_layout.itemAt(1)
     widget = item.widget() if item else None
     return widget if isinstance(widget, QLabel) else None
 
